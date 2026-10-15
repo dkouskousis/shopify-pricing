@@ -43,14 +43,20 @@ function renderProducts() {
   const all = filtered(), pageCount = Math.max(1, Math.ceil(all.length / 50));
   page = Math.min(page, pageCount - 1);
   const visible = all.slice(page * 50, page * 50 + 50);
-  $('#product-rows').innerHTML = visible.length ? visible.map(p => `<tr>
+  $('#product-rows').innerHTML = visible.length ? visible.map(p => {
+    const rule = state.rules.find(r => r.vendor === p.vendor);
+    const gainPercent = rule ? (rule.multiplier - 10000) / 100 : null;
+    const vatPercent = rule ? (rule.addVat ? rule.vat / 100 : 0) : null;
+    return `<tr>
     <td><input type="checkbox" data-select="${escape(p.id)}" aria-label="Επιλογή ${escape(p.title)} ${escape(p.variant)}" ${selected.has(p.id) ? 'checked' : ''} ${eligible(p) ? '' : 'disabled'}></td>
     <td><span class="product-title">${escape(p.title)}</span><small>${escape(p.variant)} · ${escape(p.vendor)}<br>SKU: ${escape(p.sku || '—')} · ${escape(p.status)}</small>${p.result.error ? `<small class="negative">${escape(p.result.error)}</small>` : ''}</td>
     <td class="number">${euros(p.cost)}</td>
     <td class="number">${euros(p.price)}${p.compareAt ? `<small>Compare-at: ${euros(p.compareAt)}</small>` : ''}</td>
     <td class="number new-price">${p.result.error ? '—' : euros(p.result.final)}</td>
     <td class="number ${p.result.profit < 0 ? 'negative' : ''}">${p.result.error ? '—' : euros(p.result.profit)}</td>
-    <td class="number ${p.result.margin < 0 ? 'negative' : ''}">${p.result.error ? '—' : pct(p.result.margin)}</td></tr>`).join('') : '<tr><td colspan="7" class="empty">Δεν υπάρχουν προϊόντα. Κάνε συγχρονισμό ή άλλαξε τα φίλτρα.</td></tr>';
+    <td class="number ${gainPercent < 0 ? 'negative' : ''}">${gainPercent === null ? '—' : pct(gainPercent)}</td>
+    <td class="number">${vatPercent === null ? '—' : pct(vatPercent)}</td></tr>`;
+  }).join('') : '<tr><td colspan="8" class="empty">Δεν υπάρχουν προϊόντα. Κάνε συγχρονισμό ή άλλαξε τα φίλτρα.</td></tr>';
   $('#page-label').textContent = `Σελίδα ${page + 1} / ${pageCount} · ${all.length} παραλλαγές`;
   $('#previous').disabled = page === 0; $('#next').disabled = page >= pageCount - 1;
   const selectable = visible.filter(eligible);
