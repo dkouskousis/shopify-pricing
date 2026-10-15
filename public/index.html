@@ -22,21 +22,21 @@
       <section id="products" class="tab">
         <div class="section-head"><div><h2>Προϊόντα & παραλλαγές</h2><p id="sync-time" class="muted">Δεν έχει γίνει συγχρονισμός.</p></div><button id="sync">Συγχρονισμός Shopify</button></div>
         <div class="metrics"><div><span>Παραλλαγές</span><strong id="count">0</strong></div><div><span>Με προτεινόμενη αλλαγή</span><strong id="changes">0</strong></div><div><span>Με εκκρεμότητες</span><strong id="missing">0</strong></div></div>
-        <div class="toolbar"><label class="search">Αναζήτηση<input id="search" type="search" placeholder="Προϊόν, παραλλαγή ή SKU"></label><label>Προμηθευτής<select id="vendor"><option value="">Όλοι οι προμηθευτές</option></select></label><label>Εμφάνιση<select id="filter"><option value="all">Όλα</option><option value="changed">Με αλλαγή τιμής</option><option value="missing">Με εκκρεμότητες</option></select></label></div>
+        <div class="toolbar"><label class="search">Αναζήτηση<input id="search" type="search" placeholder="Προϊόν, παραλλαγή ή SKU"></label><label>Προμηθευτής<select id="vendor"><option value="">Όλοι οι προμηθευτές</option></select></label><label>Κατάσταση<select id="status-filter"><option value="all">Όλα</option><option value="active">Active</option><option value="inactive">Inactive (μη Active)</option></select></label><label>Product Price<select id="price-filter"><option value="all">Όλα</option><option value="filled">Συμπληρωμένη (&gt; 0)</option><option value="empty">Χωρίς τιμή (κενή / 0)</option></select></label><label>Εμφάνιση<select id="filter"><option value="all">Όλα</option><option value="changed">Με αλλαγή τιμής</option><option value="missing">Με εκκρεμότητες</option></select></label></div>
         <div class="selection"><span id="selection-count">0 επιλεγμένες</span><div><button id="select-filtered" class="quiet">Επιλογή έως 100 από το φίλτρο</button><button id="clear-selection" class="quiet">Καθαρισμός</button><button id="preview" disabled>Προεπισκόπηση αλλαγών</button></div></div>
-        <div class="table-wrap"><table><thead><tr><th><input id="select-page" type="checkbox" aria-label="Επιλογή τρέχουσας σελίδας"></th><th>Προϊόν / παραλλαγή</th><th>Αγορά<br><small>χωρίς ΦΠΑ</small></th><th>Πρόσθετη χρέωση<br><small>καθαρό κόστος</small></th><th>Τωρινή τιμή</th><th>Νέα τιμή</th><th>Υπόλοιπο €*</th><th>Περιθώριο*</th></tr></thead><tbody id="product-rows"></tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th><input id="select-page" type="checkbox" aria-label="Επιλογή τρέχουσας σελίδας"></th><th>Προϊόν / παραλλαγή</th><th>Αγορά<br><small>χωρίς ΦΠΑ</small></th><th>Product Price<br><small>Τωρινή τιμή πώλησης</small></th><th>Νέα τιμή</th><th>Υπόλοιπο €*</th><th>Περιθώριο*</th></tr></thead><tbody id="product-rows"></tbody></table></div>
         <div class="pagination"><button id="previous" class="quiet">Προηγούμενη</button><span id="page-label"></span><button id="next" class="quiet">Επόμενη</button></div>
-        <p class="footnote">* Εκτίμηση μετά τον ΦΠΑ πώλησης, την αγορά και την πρόσθετη χρέωση προϊόντος. Δεν περιλαμβάνονται λοιπά μεταφορικά, προμήθειες, συσκευασία, διαφήμιση και πάγια. Η εκτίμηση αφορά ελληνική πώληση με ΦΠΑ ενσωματωμένο στην τελική τιμή, σύμφωνα με τον συντελεστή του κανόνα. Οι τιμές είναι σε EUR.</p>
+        <p class="footnote">* Εκτίμηση μετά τον ΦΠΑ πώλησης, την αγορά. Δεν περιλαμβάνονται λοιπά μεταφορικά, προμήθειες, συσκευασία, διαφήμιση και πάγια. Η εκτίμηση αφορά ελληνική πώληση με ΦΠΑ ενσωματωμένο στην τελική τιμή, σύμφωνα με τον συντελεστή του κανόνα. Οι τιμές είναι σε EUR.</p>
       </section>
       <section id="rules" class="tab" hidden>
         <div class="section-head"><div><h2>Κανόνες προμηθευτών</h2><p class="muted">Ένας κανόνας ανά όνομα Vendor του Shopify.</p></div></div>
         <div class="split"><div class="panel"><h3>Κανόνας τιμής</h3><form id="rule-form">
           <label>Προμηθευτής<input name="vendor" list="vendors-list" required maxlength="200" placeholder="Ακριβώς όπως στο Shopify"></label><datalist id="vendors-list"></datalist>
-          <div class="form-row"><label>Προσαύξηση αγοράς %<input name="markup" inputmode="decimal" required placeholder="π.χ. 55"></label><label>Σταθερό ποσό €<input name="fixed" inputmode="decimal" required value="0"></label></div>
-          <label class="check"><input name="addVat" type="checkbox" checked>Προσθήκη ΦΠΑ μετά την προσαύξηση και τα σταθερά ποσά</label>
+          <label>Συντελεστής τιμής (×)<input name="multiplier" inputmode="decimal" required placeholder="π.χ. 1,55"></label><p class="footnote">Για προσαύξηση 55% γράψε 1,55. Για 60% γράψε 1,60. Για ίδια τιμή γράψε 1.</p>
+          <label class="check"><input name="addVat" type="checkbox" checked>Προσθήκη ΦΠΑ στον υπολογισμό</label>
           <label>Συντελεστής ΦΠΑ %<input name="vat" inputmode="decimal" required value="24"></label>
           <p class="footnote">Ο συντελεστής χρησιμοποιείται και στην εκτίμηση περιθωρίου για φορολογητέα προϊόντα. Το «χωρίς προσθήκη ΦΠΑ» αλλάζει μόνο τον τύπο τιμολόγησης, όχι τη φορολογική ρύθμιση στο Shopify.</p>
-          <div class="formula">(Αγορά × (1 + προσαύξηση / 100) + σταθερό ποσό + πρόσθετη χρέωση προϊόντος) × προαιρετικός ΦΠΑ</div>
+          <div class="formula">Τιμή αγοράς × συντελεστής τιμής × προαιρετικός ΦΠΑ</div>
           <p id="rule-example" class="muted"></p><div class="actions"><button>Αποθήκευση κανόνα</button><button type="button" id="reset-rule" class="quiet">Νέος κανόνας</button></div>
         </form></div><div class="panel"><h3>Αποθηκευμένοι κανόνες</h3><div id="rule-list"></div><h3 class="spaced">Προμηθευτές χωρίς κανόνα</h3><div id="unconfigured"></div></div></div>
       </section>
@@ -54,7 +54,7 @@
         <div class="section-head"><div><h2>Ιστορικό ενημερώσεων</h2><p class="muted">Οι τελευταίες 200 απόπειρες. Οι επιτυχίες και οι αποτυχίες καταγράφονται ξεχωριστά.</p></div></div>
         <div class="table-wrap"><table><thead><tr><th>Ημερομηνία</th><th>Προϊόν</th><th>Πριν</th><th>Μετά</th><th>Αποτέλεσμα</th></tr></thead><tbody id="audit-rows"></tbody></table></div>
       </section>
-    </main><footer>Shopify Pricing <span>v1.0.0 · Ιδιωτική διαχείριση τιμών</span></footer>
+    </main><footer>Shopify Pricing <span>v1.1.0 · Ιδιωτική διαχείριση τιμών</span></footer>
   </div>
   <dialog id="preview-dialog"><div class="section-head"><div><span class="eyebrow">ΕΛΕΓΧΟΣ ΠΡΙΝ ΤΗΝ ΕΦΑΡΜΟΓΗ</span><h2>Αλλαγές τιμών</h2></div><button id="close-preview" class="quiet">Κλείσιμο</button></div><p>Έλεγξε τις παρακάτω τιμές. Η εφαρμογή θα ενημερώσει μόνο αυτές τις παραλλαγές. Η προεπισκόπηση ισχύει για 15 λεπτά.</p><div class="table-wrap"><table><thead><tr><th>Προϊόν</th><th>Πριν</th><th>Μετά</th><th>Διαφορά</th></tr></thead><tbody id="preview-rows"></tbody></table></div><p class="footnote">Ο έλεγχος για αλλαγές στο Shopify γίνεται ακριβώς πριν από κάθε ενημέρωση. Υπάρχει μικρό διάστημα μεταξύ ελέγχου και αποθήκευσης· απόφυγε παράλληλες αλλαγές τιμών από άλλη εφαρμογή.</p><button id="apply">Εφαρμογή αυτών των τιμών στο Shopify</button></dialog>
 </body>

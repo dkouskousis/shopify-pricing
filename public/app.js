@@ -1,3 +1,4 @@
+import { filterProducts } from './product-filters.mjs';
 const $ = selector => document.querySelector(selector);
 const euros = cents => cents === null || cents === undefined ? '—' : new Intl.NumberFormat('el-GR', { style: 'currency', currency: 'EUR' }).format(cents / 100);
 const pct = number => new Intl.NumberFormat('el-GR', { maximumFractionDigits: 2 }).format(number) + '%';
@@ -28,10 +29,10 @@ function tab(name) {
   document.querySelectorAll('nav button').forEach(el => el.classList.toggle('active', el.dataset.tab === name));
 }
 function filtered() {
-  const query = $('#search').value.trim().toLocaleLowerCase(), vendor = $('#vendor').value, filter = $('#filter').value;
-  return state.products.filter(p => (!vendor || p.vendor === vendor)
-    && (!query || `${p.title} ${p.variant} ${p.sku}`.toLocaleLowerCase().includes(query))
-    && (filter === 'all' || (filter === 'missing' ? p.result.error : !p.result.error && p.result.final !== p.price)));
+  return filterProducts(state.products, {
+    search: $('#search').value, vendor: $('#vendor').value, change: $('#filter').value,
+    status: $('#status-filter').value, price: $('#price-filter').value,
+  });
 }
 function eligible(p) { return !p.result.error && p.result.final !== p.price; }
 function updateSelection() {
@@ -45,11 +46,11 @@ function renderProducts() {
   $('#product-rows').innerHTML = visible.length ? visible.map(p => `<tr>
     <td><input type="checkbox" data-select="${escape(p.id)}" aria-label="Επιλογή ${escape(p.title)} ${escape(p.variant)}" ${selected.has(p.id) ? 'checked' : ''} ${eligible(p) ? '' : 'disabled'}></td>
     <td><span class="product-title">${escape(p.title)}</span><small>${escape(p.variant)} · ${escape(p.vendor)}<br>SKU: ${escape(p.sku || '—')} · ${escape(p.status)}</small>${p.result.error ? `<small class="negative">${escape(p.result.error)}</small>` : ''}</td>
-    <td class="number">${euros(p.cost)}</td><td><button class="quiet extra-button" data-extra="${escape(p.id)}">${euros(p.extra)}</button></td>
+    <td class="number">${euros(p.cost)}</td>
     <td class="number">${euros(p.price)}${p.compareAt ? `<small>Compare-at: ${euros(p.compareAt)}</small>` : ''}</td>
     <td class="number new-price">${p.result.error ? '—' : euros(p.result.final)}</td>
     <td class="number ${p.result.profit < 0 ? 'negative' : ''}">${p.result.error ? '—' : euros(p.result.profit)}</td>
-    <td class="number ${p.result.margin < 0 ? 'negative' : ''}">${p.result.error ? '—' : pct(p.result.margin)}</td></tr>`).join('') : '<tr><td colspan="8" class="empty">Δεν υπάρχουν προϊόντα. Κάνε συγχρονισμό ή άλλαξε τα φίλτρα.</td></tr>';
+    <td class="number ${p.result.margin < 0 ? 'negative' : ''}">${p.result.error ? '—' : pct(p.result.margin)}</td></tr>`).join('') : '<tr><td colspan="7" class="empty">Δεν υπάρχουν προϊόντα. Κάνε συγχρονισμό ή άλλαξε τα φίλτρα.</td></tr>';
   $('#page-label').textContent = `Σελίδα ${page + 1} / ${pageCount} · ${all.length} παραλλαγές`;
   $('#previous').disabled = page === 0; $('#next').disabled = page >= pageCount - 1;
   const selectable = visible.filter(eligible);
@@ -59,7 +60,7 @@ function renderProducts() {
 }
 function renderRules() {
   $('#vendors-list').innerHTML = state.vendors.map(v => `<option value="${escape(v)}"></option>`).join('');
-  $('#rule-list').innerHTML = state.rules.length ? state.rules.map(r => `<div class="rule-card"><div><strong>${escape(r.vendor)}</strong><p>Αγορά +${pct(r.markup / 100)} · +${euros(r.fixed)} · ${r.addVat ? 'με προσθήκη ΦΠΑ ' + pct(r.vat / 100) : 'χωρίς προσθήκη ΦΠΑ'}</p></div><div class="actions"><button class="quiet" data-edit-rule="${escape(r.vendor)}">Επεξεργασία</button><button class="quiet" data-delete-rule="${escape(r.vendor)}" aria-label="Διαγραφή κανόνα ${escape(r.vendor)}">×</button></div></div>`).join('') : '<p class="muted">Δεν έχουν οριστεί κανόνες.</p>';
+  $('#rule-list').innerHTML = state.rules.length ? state.rules.map(r => `<div class="rule-card"><div><strong>${escape(r.vendor)}</strong><p>Αγορά × ${escape(new Intl.NumberFormat('el-GR', { maximumFractionDigits: 4 }).format(r.multiplier / 10000))} · ${r.addVat ? 'με προσθήκη ΦΠΑ ' + pct(r.vat / 100) : 'χωρίς προσθήκη ΦΠΑ'}</p></div><div class="actions"><button class="quiet" data-edit-rule="${escape(r.vendor)}">Επεξεργασία</button><button class="quiet" data-delete-rule="${escape(r.vendor)}" aria-label="Διαγραφή κανόνα ${escape(r.vendor)}">×</button></div></div>`).join('') : '<p class="muted">Δεν έχουν οριστεί κανόνες.</p>';
   const missing = state.vendors.filter(v => !state.rules.some(r => r.vendor === v));
   $('#unconfigured').innerHTML = missing.length ? missing.map(v => `<button class="quiet" data-new-rule="${escape(v)}">${escape(v || '(κενό Vendor στο Shopify)')}</button>`).join(' ') : '<p class="muted">Όλοι οι συγχρονισμένοι προμηθευτές έχουν κανόνα.</p>';
 }
@@ -103,19 +104,13 @@ $('#logout').addEventListener('click', event => action(event.currentTarget, asyn
   await api('logout', {}); clearTimeout(timer); state = null; selected.clear(); $('#workspace').hidden = true; $('#login').hidden = false;
 }));
 document.querySelectorAll('nav button').forEach(button => button.addEventListener('click', () => tab(button.dataset.tab)));
-for (const selector of ['#search', '#vendor', '#filter']) $(selector).addEventListener(selector === '#search' ? 'input' : 'change', () => { page = 0; renderProducts(); });
+for (const selector of ['#search', '#vendor', '#filter', '#status-filter', '#price-filter']) $(selector).addEventListener(selector === '#search' ? 'input' : 'change', () => { page = 0; renderProducts(); });
 $('#previous').addEventListener('click', () => { page--; renderProducts(); });
 $('#next').addEventListener('click', () => { page++; renderProducts(); });
 $('#product-rows').addEventListener('change', event => {
   const id = event.target.dataset.select; if (!id) return;
   if (event.target.checked && selected.size >= 100) { event.target.checked = false; return notify('Μέχρι 100 παραλλαγές ανά εφαρμογή.', true); }
   event.target.checked ? selected.add(id) : selected.delete(id); renderProducts();
-});
-$('#product-rows').addEventListener('click', event => {
-  const button = event.target.closest('[data-extra]'); if (!button) return;
-  const product = state.products.find(p => p.id === button.dataset.extra);
-  const amount = prompt(`Πρόσθετη καθαρή χρέωση για ${product.title} / ${product.variant}, π.χ. ογκώδες. Προστίθεται μετά την προσαύξηση και πριν από τον προαιρετικό ΦΠΑ. Καταγράφεται επίσης ως κόστος στην εκτίμηση κέρδους.`, (product.extra / 100).toFixed(2));
-  if (amount !== null) action(button, async () => { await api('extra', { id: product.id, amount }); await load(); });
 });
 $('#select-page').addEventListener('change', event => {
   const check = event.target.checked;
@@ -139,8 +134,11 @@ $('#apply').addEventListener('click', event => action(event.currentTarget, async
 const ruleForm = $('#rule-form');
 function ruleExample() {
   const number = name => Number(ruleForm.elements[name].value.replace(',', '.'));
-  const values = ['markup', 'fixed', 'vat'].map(number);
-  $('#rule-example').textContent = values.every(Number.isFinite) ? 'Παράδειγμα για αγορά 60€: ' + euros(Math.round((60 * (1 + values[0] / 100) + values[1]) * (ruleForm.elements.addVat.checked ? 1 + values[2] / 100 : 1) * 100)) : '';
+  const multiplier = number('multiplier'), vat = number('vat');
+  const factor = ruleForm.elements.addVat.checked ? 1 + vat / 100 : 1;
+  const format = value => new Intl.NumberFormat('el-GR', { maximumFractionDigits: 4 }).format(value);
+  $('#rule-example').textContent = Number.isFinite(multiplier) && multiplier > 0 && Number.isFinite(vat)
+    ? `Παράδειγμα: 60€ × ${format(multiplier)} × ${format(factor)} = ${euros(Math.round(60 * multiplier * factor * 100))}` : '';
 }
 ruleForm.addEventListener('input', ruleExample);
 ruleForm.addEventListener('submit', event => { event.preventDefault(); action(event.submitter, async () => {
@@ -153,10 +151,11 @@ $('#rules').addEventListener('click', event => {
   if (edit) {
     const r = state.rules.find(r => r.vendor === edit.dataset.editRule);
     ruleForm.elements.vendor.value = r.vendor;
-    for (const field of ['markup', 'fixed', 'vat']) ruleForm.elements[field].value = (r[field] / 100).toFixed(2);
+    ruleForm.elements.multiplier.value = String(r.multiplier / 10000);
+    ruleForm.elements.vat.value = (r.vat / 100).toFixed(2);
     ruleForm.elements.addVat.checked = r.addVat; ruleExample();
   }
-  if (create) { ruleForm.reset(); ruleForm.elements.vendor.value = create.dataset.newRule; ruleForm.elements.markup.focus(); ruleExample(); }
+  if (create) { ruleForm.reset(); ruleForm.elements.vendor.value = create.dataset.newRule; ruleForm.elements.multiplier.focus(); ruleExample(); }
   if (remove && confirm('Να διαγραφεί ο κανόνας ' + remove.dataset.deleteRule + '; Οι τιμές Shopify δεν αλλάζουν.')) action(remove, async () => { await api('rules/delete', { vendor: remove.dataset.deleteRule }); await load(); });
 });
 $('#settings-form').addEventListener('input', () => { settingsDirty = true; authFields(); });

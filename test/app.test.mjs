@@ -54,7 +54,7 @@ async function harness(t, variants = [variant(1)]) {
   async function setup() {
     await login();
     assert.equal((await request('settings', { shop: 'example.myshopify.com', mode: 'access_token', clientId: '', clientSecret: '', accessToken: 'private-token' })).status, 200);
-    assert.equal((await request('rules', { vendor: 'Example', markup: '55', fixed: '0', vat: '24', addVat: true })).status, 200);
+    assert.equal((await request('rules', { vendor: 'Example', multiplier: '1.55', vat: '24', addVat: true })).status, 200);
     assert.equal((await request('sync', {})).status, 202); await idle();
   }
   return { app, request, setup, login, idle, mutations, setPageError: () => { pageError = true; }, setMutationError: () => { mutationError = true; }, pages: () => pages };
@@ -103,12 +103,12 @@ test('changed Shopify cost/price rejects a stale update and logs failure', async
   await h.request('apply', { id: p.id }); const state = await h.idle();
   assert.equal(h.mutations.length, 0); assert.equal(state.audit[0].status, 'failed');
 });
-test('rule and extra edits invalidate saved previews', async t => {
+test('rule edits invalidate saved previews', async t => {
   const h = await harness(t); await h.setup();
   const p = (await h.request('preview', { ids: [id(1)] })).data;
-  await h.request('extra', { id: id(1), amount: '25' });
+  await h.request('rules', { vendor: 'Example', multiplier: '1.60', vat: '24', addVat: true });
   assert.equal((await h.request('apply', { id: p.id })).status, 409);
-  assert.equal((await h.request('state')).data.products[0].result.final, 14632);
+  assert.equal((await h.request('state')).data.products[0].result.final, 11904);
 });
 test('compare-at price conflicts block changes without touching the sale setup', async t => {
   const v = variant(1); v.compareAtPrice = '110';
@@ -131,7 +131,7 @@ test('expired previews are rejected and rule edits invalidate fresh previews', a
   h.app.store.db.prepare('UPDATE previews SET expires=0 WHERE id=?').run(p.id);
   assert.equal((await h.request('apply', { id: p.id })).status, 409);
   const p2 = (await h.request('preview', { ids: [id(1)] })).data;
-  await h.request('rules', { vendor: 'Example', markup: '60', fixed: '0', vat: '24', addVat: true });
+  await h.request('rules', { vendor: 'Example', multiplier: '1.60', vat: '24', addVat: true });
   assert.equal((await h.request('apply', { id: p2.id })).status, 409);
 });
 test('credential encryption round-trips and does not expose the plaintext', () => {

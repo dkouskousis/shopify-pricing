@@ -69,13 +69,12 @@ export function createApplication(config, dependencies = {}) {
   }
   function resultFor(v) {
     const rule = store.rules().find(r => r.vendor === v.vendor);
-    const extra = store.extra(v.id);
-    const result = calculate(v.cost, rule, extra, v.taxable);
-    if (v.currency && v.currency !== 'EUR') return { ...v, extra, result: { error: 'Το κόστος δεν είναι σε EUR.' } };
-    if (v.status === 'ARCHIVED') return { ...v, extra, result: { error: 'Αρχειοθετημένο προϊόν.' } };
+    const result = calculate(v.cost, rule, v.taxable);
+    if (v.currency && v.currency !== 'EUR') return { ...v, result: { error: 'Το κόστος δεν είναι σε EUR.' } };
+    if (v.status === 'ARCHIVED') return { ...v, result: { error: 'Αρχειοθετημένο προϊόν.' } };
     if (!result.error && v.compareAt !== null && v.compareAt > 0 && result.final >= v.compareAt) result.error = 'Η προτεινόμενη τιμή φτάνει/ξεπερνά την Compare-at price. Έλεγξέ την πρώτα στο Shopify.';
     if (!result.error && result.final <= 0) result.error = 'Η τελική τιμή πρέπει να είναι θετική.';
-    return { ...v, extra, result };
+    return { ...v, result };
   }
   async function sync() {
     const api = graphql(), info = (await api(QUERIES.shop)).shop;
@@ -94,7 +93,6 @@ export function createApplication(config, dependencies = {}) {
       db.exec('DELETE FROM variants');
       const insert = db.prepare('INSERT INTO variants VALUES (?,?)');
       for (const v of all) insert.run(v.id, JSON.stringify(v));
-      db.prepare('DELETE FROM extras WHERE id NOT IN (SELECT id FROM variants)').run();
       store.put('shopInfo', info); store.put('lastSync', new Date().toISOString()); invalidate();
       db.exec('COMMIT');
     } catch (error) { db.exec('ROLLBACK'); throw error; }
@@ -194,11 +192,6 @@ export function createApplication(config, dependencies = {}) {
           db.prepare('INSERT OR REPLACE INTO rules VALUES (?,?)').run(rule.vendor, JSON.stringify(rule)); invalidate(); return json({ ok: true });
         }
         if (url.pathname === '/api/rules/delete') { db.prepare('DELETE FROM rules WHERE vendor=?').run(String(input.vendor)); invalidate(); return json({ ok: true }); }
-        if (url.pathname === '/api/extra') {
-          if (!store.variant(input.id)) fail('Δεν βρέθηκε η παραλλαγή.');
-          db.prepare('INSERT OR REPLACE INTO extras VALUES (?,?)').run(input.id, decimal(input.amount, 'Πρόσθετη χρέωση', 100000));
-          invalidate(); return json({ ok: true });
-        }
         if (url.pathname === '/api/sync') { startJob('sync', sync); return json({ ok: true }, 202); }
         if (url.pathname === '/api/preview') {
           if (!Array.isArray(input.ids) || !input.ids.length || input.ids.length > 100 || new Set(input.ids).size !== input.ids.length) fail('Επίλεξε 1–100 διαφορετικές παραλλαγές.');
@@ -223,7 +216,7 @@ export function createApplication(config, dependencies = {}) {
         }
         fail('Δεν βρέθηκε.', 404);
       }
-      const paths = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
+      const paths = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/product-filters.mjs': ['product-filters.mjs', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
       if (req.method === 'GET' && paths[url.pathname]) {
         const [file, type] = paths[url.pathname];
         res.writeHead(200, { ...headers, 'Content-Type': `${type}; charset=utf-8` });

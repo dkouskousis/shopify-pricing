@@ -11,11 +11,28 @@ export function openStore(path, encryptionKey) {
     CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS variants (id TEXT PRIMARY KEY, data TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS rules (vendor TEXT PRIMARY KEY, data TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS extras (id TEXT PRIMARY KEY, amount INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, csrf TEXT NOT NULL, expires INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS previews (id TEXT PRIMARY KEY, data TEXT NOT NULL, expires INTEGER NOT NULL, consumed INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY, created TEXT NOT NULL, variant_id TEXT NOT NULL, title TEXT NOT NULL, old_price INTEGER NOT NULL, new_price INTEGER NOT NULL, status TEXT NOT NULL, detail TEXT NOT NULL);
   `);
+  // One-time v1 -> v2 migration. Preserve the former rules/charges locally,
+  // but do not include flat charges in the newly requested simple formula.
+  if (db.prepare('PRAGMA user_version').get().user_version < 2) {
+    db.exec('BEGIN');
+    try {
+      const oldRules = db.prepare('SELECT vendor,data FROM rules').all();
+      const hasExtras = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='extras'").get();
+      const oldExtras = hasExtras ? db.prepare('SELECT * FROM extras').all() : [];
+      if (oldRules.length || oldExtras.length) db.prepare('INSERT OR REPLACE INTO meta VALUES (?,?)').run('legacyPricingV1', JSON.stringify({ rules: oldRules, extras: oldExtras }));
+      for (const row of oldRules) {
+        const old = JSON.parse(row.data);
+        const rule = { vendor: old.vendor, multiplier: 10000 + old.markup, vat: old.vat, addVat: old.addVat };
+        db.prepare('UPDATE rules SET data=? WHERE vendor=?').run(JSON.stringify(rule), row.vendor);
+      }
+      if (hasExtras) db.exec('DROP TABLE extras');
+      db.exec('DELETE FROM previews; PRAGMA user_version=2; COMMIT');
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
+  }
   // Interrupted writes may have reached Shopify. Never automatically repeat them.
   db.prepare("UPDATE audit SET status='uncertain',detail='Η εφαρμογή επανεκκινήθηκε κατά την ενημέρωση. Συγχρόνισε και έλεγξε την τιμή.' WHERE status='pending'").run();
   const key = Buffer.from(encryptionKey, 'hex');
@@ -37,6 +54,5 @@ export function openStore(path, encryptionKey) {
     rules() { return db.prepare('SELECT data FROM rules ORDER BY vendor').all().map(r => JSON.parse(r.data)); },
     variants() { return db.prepare('SELECT data FROM variants').all().map(r => JSON.parse(r.data)); },
     variant(id) { const row = db.prepare('SELECT data FROM variants WHERE id=?').get(id); return row ? JSON.parse(row.data) : null; },
-    extra(id) { return db.prepare('SELECT amount FROM extras WHERE id=?').get(id)?.amount ?? 0; },
   };
 }
