@@ -1,0 +1,24 @@
+services:
+  pricing:
+    image: ghcr.io/dkouskousis/shopify-pricing:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 45s
+    ports:
+      - "${BIND_IP:-127.0.0.1}:${APP_PORT:-3180}:3000"
+    environment:
+      APP_URL: ${APP_URL:?Set the public HTTPS URL of the application}
+      APP_PASSWORD: ${APP_PASSWORD:?Set a strong password of at least 16 characters}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set a persistent 64-character hexadecimal key}
+    volumes:
+      - pricing_data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 512m
+volumes:
+  pricing_data:

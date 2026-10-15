@@ -1,0 +1,5 @@
+# Explicit local build option: docker compose -f docker-compose.yml -f compose.build.yml up -d --build
+services:
+  pricing:
+    image: shopify-pricing:local
+    build: .
