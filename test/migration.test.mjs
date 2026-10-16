@@ -5,6 +5,24 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore } from '../store.mjs';
+test('rounding upgrade invalidates old previews once and preserves supplier rules', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pricing-rounding-')), path = join(dir, 'test.sqlite');
+  try {
+    const key = 'ab'.repeat(32), initial = openStore(path, key);
+    const rule = { vendor: 'Existing', mode: 'margin', multiplier: null, targetMargin: 4000, fixed: 1000, vat: 2400, addVat: true };
+    initial.db.prepare('INSERT INTO rules VALUES (?,?)').run(rule.vendor, JSON.stringify(rule));
+    initial.db.prepare('INSERT INTO previews(id,data,expires) VALUES (?,?,?)').run('old', '{}', Date.now() + 10000);
+    initial.db.exec('PRAGMA user_version=5'); initial.db.close();
+    const upgraded = openStore(path, key);
+    assert.deepEqual(upgraded.rules(), [rule]);
+    assert.equal(upgraded.db.prepare('SELECT count(*) AS n FROM previews').get().n, 0);
+    upgraded.db.prepare('INSERT INTO previews(id,data,expires) VALUES (?,?,?)').run('fresh', '{}', Date.now() + 10000);
+    upgraded.db.close();
+    const reopened = openStore(path, key);
+    assert.equal(reopened.db.prepare('SELECT count(*) AS n FROM previews').get().n, 1);
+    reopened.db.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 test('v1 rules migrate once, keep credentials/data and back up removed flat amounts', () => {
   const dir = mkdtempSync(join(tmpdir(), 'pricing-migration-'));
   const path = join(dir, 'test.sqlite');

@@ -181,13 +181,13 @@ function ruleExample() {
     const base = marginMode
       ? `${euros(cost)} ÷ (1 − ${format(rule.targetMargin / 100)} / 100)`
       : `${euros(cost)} × ${format(rule.multiplier / 10000)}`;
-    $('#rule-example').textContent = `(${base} + ${euros(rule.fixed)}) × ${format(rule.addVat ? 1 + rule.vat / 10000 : 1)} = ${euros(result.final)}`;
+    $('#rule-example').textContent = `(${base} + ${euros(rule.fixed)}) × ${format(rule.addVat ? 1 + rule.vat / 10000 : 1)} → ${euros(result.final)} μετά τη στρογγυλοποίηση`;
     $('#example-final').textContent = euros(result.final);
     $('#example-profit').textContent = euros(result.profit);
     $('#example-margin').textContent = pct(result.margin);
     $('#example-note').textContent = marginMode && !rule.addVat && rule.vat > 0
       ? 'Σε φορολογητέα πώληση, χωρίς προσθήκη ΦΠΑ η αφαίρεσή του από την τελική τιμή μειώνει το πραγματικό περιθώριο κάτω από τον στόχο.'
-      : 'Παράδειγμα ελληνικής φορολογητέας πώλησης. Το μικτό κέρδος δεν περιλαμβάνει μεταφορικά και λοιπά έξοδα. Μικρές αποκλίσεις μπορεί να προκύψουν από στρογγυλοποίηση στο λεπτό.';
+      : 'Παράδειγμα ελληνικής φορολογητέας πώλησης. Το κέρδος και το περιθώριο υπολογίζονται από τη στρογγυλεμένη τιμή και δεν περιλαμβάνουν μεταφορικά και λοιπά έξοδα.';
   } catch (error) {
     $('#rule-example').textContent = error.message;
     for (const id of ['#example-final', '#example-profit', '#example-margin']) $(id).textContent = '—';
