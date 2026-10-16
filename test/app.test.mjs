@@ -10,12 +10,17 @@ const id = n => `gid://shopify/ProductVariant/${n}`;
 function variant(n, price = '100.00', cost = '60.00') {
   return { id: id(n), title: 'Medium', price, compareAtPrice: null, taxable: true,
     inventoryItem: { id: 'gid://shopify/InventoryItem/' + n, sku: 'TEST-' + n, unitCost: cost === null ? null : { amount: cost, currencyCode: 'EUR' } },
-    product: { id: 'gid://shopify/Product/9', title: 'Test product ' + n, vendor: 'Example', fixed: '0', status: 'ACTIVE' } };
+    product: { id: 'gid://shopify/Product/9', title: 'Test product ' + n, vendor: 'Example', conditions: [], fixed: '0', status: 'ACTIVE' } };
 }
 async function harness(t, variants = [variant(1)]) {
-  let mutations = [], costMutations = [], pages = 0, pageError = false, mutationError = false, costFailure = null;
+  let collectionIds = ['gid://shopify/Collection/1'];
+  let mutations = [], costMutations = [], pages = 0, pageError = false, mutationError = false, costFailure = null, collectionsError = false;
   const api = async (query, variables) => {
     if (query.includes('ShopInfo')) return { shop: { name: 'Test shop', myshopifyDomain: 'example.myshopify.com', currencyCode: 'EUR' } };
+    if (query.includes('PricingCollections') && collectionsError) throw new Error('Collections sync failed');
+    if (query.includes('PricingCollections')) return { collections: { nodes: [{ id: 'gid://shopify/Collection/1', title: 'Sleep' }], pageInfo: { hasNextPage: false, endCursor: null } } };
+    if (query.includes('PricingMemberships')) return { nodes: variables.ids.map(id => ({ id, collections: { nodes: [{ id: 'gid://shopify/Collection/1' }], pageInfo: { hasNextPage: false, endCursor: null } } })) };
+    if (query.includes('PricingProductCollections')) return { product: { collections: { nodes: collectionIds.map(id => ({ id })), pageInfo: { hasNextPage: false, endCursor: null } } } };
     if (query.includes('PricingVariants')) {
       pages++;
       if (pageError) throw new Error('Sync failed');
@@ -62,10 +67,10 @@ async function harness(t, variants = [variant(1)]) {
   async function setup() {
     await login();
     assert.equal((await request('settings', { shop: 'example.myshopify.com', mode: 'access_token', clientId: '', clientSecret: '', accessToken: 'private-token' })).status, 200);
-    assert.equal((await request('rules', { vendor: 'Example', fixed: '0', mode: 'multiplier', multiplier: '1.55', vat: '24', addVat: true })).status, 200);
+    assert.equal((await request('rules', { vendor: 'Example', conditions: [], fixed: '0', mode: 'multiplier', multiplier: '1.55', vat: '24', addVat: true })).status, 200);
     assert.equal((await request('sync', {})).status, 202); await idle();
   }
-  return { app, request, setup, login, idle, mutations, costMutations, setCostFailure: value => { costFailure = value; }, setPageError: () => { pageError = true; }, setMutationError: () => { mutationError = true; }, pages: () => pages };
+  return { app, request, setup, login, idle, setCollections: ids => { collectionIds = ids; }, setCollectionsError: () => { collectionsError = true; }, mutations, costMutations, setCostFailure: value => { costFailure = value; }, setPageError: () => { pageError = true; }, setMutationError: () => { mutationError = true; }, pages: () => pages };
 }
 test('authentication, origin and CSRF guard every write; secrets are masked', async t => {
   const h = await harness(t);
@@ -114,7 +119,7 @@ test('changed Shopify cost/price rejects a stale update and logs failure', async
 test('rule edits invalidate saved previews', async t => {
   const h = await harness(t); await h.setup();
   const p = (await h.request('preview', { ids: [id(1)] })).data;
-  await h.request('rules', { vendor: 'Example', fixed: '0', mode: 'multiplier', multiplier: '1.60', vat: '24', addVat: true });
+  await h.request('rules', { vendor: 'Example', conditions: [], fixed: '0', mode: 'multiplier', multiplier: '1.60', vat: '24', addVat: true });
   assert.equal((await h.request('apply', { id: p.id })).status, 409);
   assert.equal((await h.request('state')).data.products[0].result.final, 12000);
 });
@@ -139,7 +144,7 @@ test('expired previews are rejected and rule edits invalidate fresh previews', a
   h.app.store.db.prepare('UPDATE previews SET expires=0 WHERE id=?').run(p.id);
   assert.equal((await h.request('apply', { id: p.id })).status, 409);
   const p2 = (await h.request('preview', { ids: [id(1)] })).data;
-  await h.request('rules', { vendor: 'Example', fixed: '0', mode: 'multiplier', multiplier: '1.60', vat: '24', addVat: true });
+  await h.request('rules', { vendor: 'Example', conditions: [], fixed: '0', mode: 'multiplier', multiplier: '1.60', vat: '24', addVat: true });
   assert.equal((await h.request('apply', { id: p2.id })).status, 409);
 });
 test('credential encryption round-trips and does not expose the plaintext', () => {
@@ -210,7 +215,7 @@ test('failed or uncertain cost writes do not become successful local costs', asy
 });
 test('margin rules persist, preview and apply the intended price, then recalculate after cost edits', async t => {
   const h = await harness(t); await h.setup();
-  const result = await h.request('rules', { vendor: 'Example', fixed: '0', mode: 'margin', targetMargin: '40', vat: '24', addVat: true });
+  const result = await h.request('rules', { vendor: 'Example', conditions: [], fixed: '0', mode: 'margin', targetMargin: '40', vat: '24', addVat: true });
   assert.equal(result.status, 200);
   const state = (await h.request('state')).data;
   assert.equal(state.rules[0].mode, 'margin');
@@ -226,7 +231,7 @@ test('margin rules persist, preview and apply the intended price, then recalcula
 });
 test('fixed rule amount persists and flows through preview and Shopify price apply', async t => {
   const h = await harness(t); await h.setup();
-  const response = await h.request('rules', { vendor: 'Example', mode: 'multiplier', multiplier: '1.4', fixed: '10', vat: '24', addVat: true });
+  const response = await h.request('rules', { vendor: 'Example', conditions: [], mode: 'multiplier', multiplier: '1.4', fixed: '10', vat: '24', addVat: true });
   assert.equal(response.status, 200);
   assert.equal((await h.request('state')).data.rules[0].fixed, 1000);
   const plan = (await h.request('preview', { ids: [id(1)] })).data;
@@ -236,11 +241,60 @@ test('fixed rule amount persists and flows through preview and Shopify price app
 });
 test('small product price uses half-euro rounding consistently through Shopify apply', async t => {
   const h = await harness(t, [variant(1, '8.00', '8.12')]); await h.setup();
-  await h.request('rules', { vendor: 'Example', mode: 'multiplier', multiplier: '1', fixed: '0', vat: '0', addVat: false });
+  await h.request('rules', { vendor: 'Example', conditions: [], mode: 'multiplier', multiplier: '1', fixed: '0', vat: '0', addVat: false });
   const state = (await h.request('state')).data;
-  assert.deepEqual(state.products[0].result, { final: 850, net: 850, profit: 38, margin: 4.47 });
+  assert.deepEqual(state.products[0].result, { final: 850, net: 850, profit: 38, margin: 4.47, fixed: 0, referencePrice: 850 });
   const plan = (await h.request('preview', { ids: [id(1)] })).data;
   assert.equal(plan.items[0].newPrice, 850);
   await h.request('apply', { id: plan.id }); await h.idle();
   assert.equal(h.mutations[0].variants[0].price, '8.50');
+});
+
+test('conditional totals persist and match state, preview and Shopify writes', async t => {
+  const h = await harness(t, [variant(1, '300.00', '300.00')]); await h.setup();
+  const conditions = [
+    { from: '300', to: '999', amount: '25', collectionId: 'gid://shopify/Collection/1' },
+    { from: '300', to: '999', amount: '2', collectionId: '' },
+  ];
+  assert.equal((await h.request('rules', { vendor: 'Example', mode: 'multiplier', multiplier: '1', fixed: '1', vat: '24', addVat: true, conditions })).status, 200);
+  const state = (await h.request('state')).data;
+  assert.equal(state.collections[0].title, 'Sleep');
+  assert.deepEqual(state.products[0].collectionIds, ['gid://shopify/Collection/1']);
+  assert.equal(state.rules[0].conditions.length, 2);
+  assert.equal(state.products[0].result.fixed, 2800);
+  assert.equal(state.products[0].result.final, 40700);
+  const plan = (await h.request('preview', { ids: [id(1)] })).data;
+  assert.equal(plan.items[0].newPrice, 40700);
+  await h.request('apply', { id: plan.id }); await h.idle();
+  assert.equal(h.mutations[0].variants[0].price, '407.00');
+});
+test('collection membership changes reject a stale price update before writing', async t => {
+  const h = await harness(t); await h.setup();
+  await h.request('rules', { vendor: 'Example', mode: 'multiplier', multiplier: '1', fixed: '0', vat: '24', addVat: true,
+    conditions: [{ from: '0', to: '999', amount: '25', collectionId: 'gid://shopify/Collection/1' }] });
+  const plan = (await h.request('preview', { ids: [id(1)] })).data;
+  h.setCollections([]);
+  await h.request('apply', { id: plan.id }); const state = await h.idle();
+  assert.equal(h.mutations.length, 0);
+  assert.equal(state.audit[0].status, 'failed');
+  assert.match(state.audit[0].detail, /collections/);
+});
+test('unknown collection IDs cannot be silently saved', async t => {
+  const h = await harness(t); await h.setup();
+  const result = await h.request('rules', { vendor: 'Example', mode: 'multiplier', multiplier: '1', fixed: '0', vat: '24', addVat: true,
+    conditions: [{ from: '0', to: '999', amount: '25', collectionId: 'gid://shopify/Collection/999' }] });
+  assert.equal(result.status, 400);
+  assert.equal((await h.request('state')).data.rules[0].conditions.length, 0);
+});
+
+test('failed collections sync keeps previous variants, collections and timestamp together', async t => {
+  const variants = [variant(1)], h = await harness(t, variants); await h.setup();
+  const before = (await h.request('state')).data;
+  variants[0].inventoryItem.unitCost.amount = '999.00';
+  h.setCollectionsError();
+  await h.request('sync', {}); const after = await h.idle();
+  assert.match(after.job.error, /Collections sync failed/);
+  assert.equal(after.products[0].cost, 6000);
+  assert.deepEqual(after.collections, before.collections);
+  assert.equal(after.lastSync, before.lastSync);
 });

@@ -1,6 +1,15 @@
 import { setTimeout as delay } from 'node:timers/promises';
 
 export const QUERIES = {
+  collections: `query PricingCollections($after: String) {
+    collections(first: 250, after: $after) { nodes { id title } pageInfo { hasNextPage endCursor } }
+  }`,
+  memberships: `query PricingMemberships($ids: [ID!]!) {
+    nodes(ids: $ids) { ... on Product { id collections(first: 50) { nodes { id } pageInfo { hasNextPage endCursor } } } }
+  }`,
+  productCollections: `query PricingProductCollections($id: ID!, $after: String) {
+    product(id: $id) { collections(first: 250, after: $after) { nodes { id } pageInfo { hasNextPage endCursor } } }
+  }`,
   shop: `query ShopInfo { shop { name myshopifyDomain currencyCode } }`,
   variants: `query PricingVariants($after: String) {
     productVariants(first: 100, after: $after) {
@@ -30,6 +39,28 @@ export const QUERIES = {
     }
   }`,
 };
+export async function collectionPages(fetchPage, firstPage = null) {
+  const all = [], cursors = new Set();
+  let after = null, page = firstPage;
+  do {
+    if (!page) page = await fetchPage(after);
+    all.push(...page.nodes);
+    if (all.length > 25000) throw new Error('Υπέρβαση ορίου 25.000 collections.');
+    if (!page.pageInfo.hasNextPage) break;
+    after = page.pageInfo.endCursor;
+    if (!after || cursors.has(after)) throw new Error('Μη έγκυρος cursor collections από το Shopify.');
+    cursors.add(after); page = null;
+  } while (true);
+  return all;
+}
+export async function productCollectionIds(api, id, firstPage = null) {
+  const nodes = await collectionPages(async after => {
+    const { product } = await api(QUERIES.productCollections, { id, after });
+    if (!product) throw new Error('Το προϊόν δεν υπάρχει πλέον στο Shopify.');
+    return product.collections;
+  }, firstPage);
+  return [...new Set(nodes.map(c => c.id))].sort();
+}
 export function validateSettings(input, previous = {}) {
   const shop = String(input.shop ?? '').trim().toLowerCase();
   if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shop)) throw new Error('Βάλε το πλήρες domain καταστήματος, π.χ. example.myshopify.com, χωρίς https://.');

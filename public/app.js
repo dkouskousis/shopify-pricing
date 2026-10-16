@@ -55,7 +55,7 @@ function renderProducts() {
     <td class="number">${euros(p.price)}${p.compareAt ? `<small>Compare-at: ${euros(p.compareAt)}</small>` : ''}</td>
     <td class="number new-price">${p.result.error ? '—' : euros(p.result.final)}</td>
     <td class="number ${gainPercent < 0 ? 'negative' : ''}">${gainPercent === null ? '—' : pct(gainPercent)}${rule?.mode === 'margin' ? `<small>Στόχος περιθωρίου ${pct(rule.targetMargin / 100)}</small>` : ''}</td>
-    <td class="number">${euros(rule ? rule.fixed : 0)}</td>
+    <td class="number">${rule ? (p.result.error ? '—' : euros(p.result.fixed)) : euros(0)}</td>
     <td class="number">${vatPercent === null ? '—' : pct(vatPercent)}</td>
     <td class="number ${p.result.profit < 0 ? 'negative' : ''}">${p.result.error ? '—' : euros(p.result.profit)}</td>
     <td class="number ${p.result.margin < 0 ? 'negative' : ''}">${p.result.error ? '—' : pct(p.result.margin)}</td></tr>`;
@@ -70,6 +70,10 @@ function renderProducts() {
 function renderRules() {
   $('#vendors-list').innerHTML = state.vendors.map(v => `<option value="${escape(v)}"></option>`).join('');
   $('#rule-list').innerHTML = state.rules.length ? state.rules.map(r => `<div class="rule-card"><div><strong>${escape(r.vendor)}</strong><p><span class="rule-type">${r.mode === 'margin' ? 'Περιθώριο ' + pct(r.targetMargin / 100) : 'Συντελεστής ×' + escape(new Intl.NumberFormat('el-GR', { maximumFractionDigits: 4 }).format(r.multiplier / 10000))}</span> · +${euros(r.fixed)} πριν τον ΦΠΑ · ${r.addVat ? 'με προσθήκη ΦΠΑ ' + pct(r.vat / 100) : 'χωρίς προσθήκη ΦΠΑ'}</p></div><div class="actions"><button class="quiet" data-edit-rule="${escape(r.vendor)}">Επεξεργασία</button><button class="quiet" data-delete-rule="${escape(r.vendor)}" aria-label="Διαγραφή κανόνα ${escape(r.vendor)}">×</button></div></div>`).join('') : '<p class="muted">Δεν έχουν οριστεί κανόνες.</p>';
+  for (const card of document.querySelectorAll('.rule-card')) {
+    const rule = state.rules.find(r => r.vendor === card.querySelector('[data-edit-rule]').dataset.editRule);
+    if (rule.conditions.length) card.querySelector('div').insertAdjacentHTML('beforeend', `<ul class="condition-summary">${rule.conditions.map(c => `<li>${euros(c.from)}–${euros(c.to)} · ${escape(c.collectionId ? state.collections.find(x => x.id === c.collectionId)?.title ?? 'Collection δεν βρέθηκε' : 'Όλα τα collections')} · +${euros(c.amount)} πριν τον ΦΠΑ</li>`).join('')}</ul>`);
+  }
   const missing = state.vendors.filter(v => !state.rules.some(r => r.vendor === v));
   $('#unconfigured').innerHTML = missing.length ? missing.map(v => `<button class="quiet" data-new-rule="${escape(v)}">${escape(v || '(κενό Vendor στο Shopify)')}</button>`).join(' ') : '<p class="muted">Όλοι οι συγχρονισμένοι προμηθευτές έχουν κανόνα.</p>';
 }
@@ -96,7 +100,7 @@ async function load() {
   $('#vendor').innerHTML = '<option value="">Όλοι οι προμηθευτές</option>' + state.vendors.map(v => `<option value="${escape(v)}">${escape(v || '(κενό Vendor)')}</option>`).join('');
   $('#vendor').value = state.vendors.includes(vendor) ? vendor : '';
   selected = new Set([...selected].filter(id => state.products.some(p => p.id === id && eligible(p))));
-  renderProducts(); renderRules(); renderSettings();
+  renderProducts(); renderRules(); renderSettings(); refreshCollectionOptions(); ruleExample();
   const labels = { success: 'Επιτυχία', failed: 'Αποτυχία', uncertain: 'Χρειάζεται έλεγχο στο Shopify', pending: 'Σε εξέλιξη' };
   $('#audit-rows').innerHTML = state.audit.length ? state.audit.map(a => `<tr><td>${date(a.created)}</td><td>${a.kind === 'cost' ? 'Κόστος αγοράς' : 'Τιμή πώλησης'}</td><td>${escape(a.title)}</td><td class="number">${a.old_missing ? '—' : euros(a.old_price)}</td><td class="number">${euros(a.new_price)}</td><td class="${a.status === 'success' ? 'positive' : 'negative'}">${labels[a.status] ?? escape(a.status)}<small>${escape(a.detail)}</small></td></tr>`).join('') : '<tr><td colspan="6" class="empty">Δεν έχουν καταγραφεί αλλαγές τιμών ή κόστους.</td></tr>';
   $('#sync').disabled = state.job.running || state.job.costSaving;
@@ -162,6 +166,38 @@ $('#apply').addEventListener('click', event => action(event.currentTarget, async
   if (!preview) return; await api('apply', { id: preview.id }); preview = null; $('#preview-dialog').close(); selected.clear(); await load();
 }));
 const ruleForm = $('#rule-form');
+function collectionOptions(selected = '') {
+  const collections = state ? state.collections : [];
+  return '<option value="">Όλα τα collections</option>' + collections.map(c => `<option value="${escape(c.id)}" ${c.id === selected ? 'selected' : ''}>${escape(c.title)}</option>`).join('')
+    + (selected && !collections.some(c => c.id === selected) ? `<option value="${escape(selected)}" selected>Collection δεν βρέθηκε — κάνε συγχρονισμό</option>` : '');
+}
+function refreshCollectionOptions() {
+  for (const select of document.querySelectorAll('[data-condition-field="collectionId"]')) select.innerHTML = collectionOptions(select.value);
+  const example = $('#example-collections'), selectedIds = [...example.selectedOptions].map(o => o.value);
+  example.innerHTML = state.collections.map(c => `<option value="${escape(c.id)}" ${selectedIds.includes(c.id) ? 'selected' : ''}>${escape(c.title)}</option>`).join('');
+}
+function conditionInputs() {
+  return [...document.querySelectorAll('.condition-row')].map(row => Object.fromEntries([...row.querySelectorAll('[data-condition-field]')].map(field => [field.dataset.conditionField, field.value])));
+}
+function renumberConditions() {
+  document.querySelectorAll('.condition-row legend').forEach((legend, i) => { legend.textContent = `Όρος ${i + 1}`; });
+  $('#conditions-empty').hidden = Boolean(document.querySelector('.condition-row'));
+}
+function addCondition(c = { from: '0', to: '999,99', amount: '0', collectionId: '' }) {
+  if (document.querySelectorAll('.condition-row').length >= 50) return notify('Έως 50 όροι ανά brand.', true);
+  $('#condition-rows').insertAdjacentHTML('beforeend', `<fieldset class="condition-row"><legend></legend><div class="condition-grid">
+    <label>Τιμή από (€)<input data-condition-field="from" inputmode="decimal" value="${escape(c.from)}" required></label>
+    <label>Τιμή μέχρι (€)<input data-condition-field="to" inputmode="decimal" value="${escape(c.to)}" required></label>
+    <label>Προσθήκη πριν τον ΦΠΑ (€)<input data-condition-field="amount" inputmode="decimal" value="${escape(c.amount)}" required></label>
+    <label class="condition-collection">Collection (προαιρετικό)<select data-condition-field="collectionId">${collectionOptions(c.collectionId)}</select></label>
+    </div><button type="button" class="quiet" data-remove-condition>Αφαίρεση όρου</button></fieldset>`);
+  renumberConditions();
+}
+function clearConditions() { $('#condition-rows').innerHTML = ''; $('#example-collections').value = ''; renumberConditions(); }
+$('#add-condition').addEventListener('click', () => { addCondition(); ruleExample(); });
+$('#condition-rows').addEventListener('click', event => {
+  if (event.target.closest('[data-remove-condition]')) { event.target.closest('.condition-row').remove(); renumberConditions(); ruleExample(); }
+});
 function ruleExample() {
   const marginMode = ruleForm.elements.mode.value === 'margin';
   $('#multiplier-fields').hidden = marginMode; $('#margin-fields').hidden = !marginMode;
@@ -173,15 +209,17 @@ function ruleExample() {
   try {
     const rule = validateRule({ vendor: 'Παράδειγμα', mode: ruleForm.elements.mode.value,
       multiplier: ruleForm.elements.multiplier.value, targetMargin: ruleForm.elements.targetMargin.value,
-      fixed: ruleForm.elements.fixed.value, addVat: ruleForm.elements.addVat.checked, vat: ruleForm.elements.vat.value });
+      conditions: conditionInputs(), fixed: ruleForm.elements.fixed.value, addVat: ruleForm.elements.addVat.checked, vat: ruleForm.elements.vat.value });
     const cost = decimal($('#example-cost').value, 'Δοκιμαστική αγορά');
-    const result = calculate(cost, rule);
+    const result = calculate(cost, rule, true, [...$('#example-collections').selectedOptions].map(o => o.value));
     if (result.error) throw new Error(result.error);
     const format = value => new Intl.NumberFormat('el-GR', { maximumFractionDigits: 4 }).format(value);
     const base = marginMode
       ? `${euros(cost)} ÷ (1 − ${format(rule.targetMargin / 100)} / 100)`
       : `${euros(cost)} × ${format(rule.multiplier / 10000)}`;
-    $('#rule-example').textContent = `(${base} + ${euros(rule.fixed)}) × ${format(rule.addVat ? 1 + rule.vat / 10000 : 1)} → ${euros(result.final)} μετά τη στρογγυλοποίηση`;
+    $('#example-reference').textContent = `Τιμή ελέγχου όρων: ${euros(result.referencePrice)} (πριν από τις προσθήκες των όρων)`;
+    $('#example-added').textContent = `Συνολικό σταθερό ποσό πριν τον ΦΠΑ: ${euros(result.fixed)}`;
+    $('#rule-example').textContent = `(${base} + ${euros(result.fixed)}) × ${format(rule.addVat ? 1 + rule.vat / 10000 : 1)} → ${euros(result.final)} μετά τη στρογγυλοποίηση`;
     $('#example-final').textContent = euros(result.final);
     $('#example-profit').textContent = euros(result.profit);
     $('#example-margin').textContent = pct(result.margin);
@@ -189,22 +227,27 @@ function ruleExample() {
       ? 'Σε φορολογητέα πώληση, χωρίς προσθήκη ΦΠΑ η αφαίρεσή του από την τελική τιμή μειώνει το πραγματικό περιθώριο κάτω από τον στόχο.'
       : 'Παράδειγμα ελληνικής φορολογητέας πώλησης. Το κέρδος και το περιθώριο υπολογίζονται από τη στρογγυλεμένη τιμή και δεν περιλαμβάνουν μεταφορικά και λοιπά έξοδα.';
   } catch (error) {
+    $('#example-reference').textContent = ''; $('#example-added').textContent = '';
     $('#rule-example').textContent = error.message;
     for (const id of ['#example-final', '#example-profit', '#example-margin']) $(id).textContent = '—';
     $('#example-note').textContent = '';
   }
 }
 ruleForm.addEventListener('input', ruleExample);
+ruleForm.addEventListener('change', ruleExample);
 ruleForm.addEventListener('submit', event => { event.preventDefault(); action(event.submitter, async () => {
   const data = Object.fromEntries(new FormData(ruleForm)); data.addVat = ruleForm.elements.addVat.checked;
+  data.conditions = conditionInputs();
   await api('rules', data); await load(); notify('Ο κανόνας αποθηκεύτηκε. Οι τιμές Shopify δεν άλλαξαν.');
 }); });
-$('#reset-rule').addEventListener('click', () => { ruleForm.reset(); ruleExample(); });
+$('#reset-rule').addEventListener('click', () => { ruleForm.reset(); clearConditions(); ruleExample(); });
 $('#rules').addEventListener('click', event => {
   const edit = event.target.closest('[data-edit-rule]'), create = event.target.closest('[data-new-rule]'), remove = event.target.closest('[data-delete-rule]');
   if (edit) {
     const r = state.rules.find(r => r.vendor === edit.dataset.editRule);
     ruleForm.elements.vendor.value = r.vendor;
+    clearConditions();
+    for (const c of r.conditions) addCondition({ ...c, from: (c.from / 100).toFixed(2), to: (c.to / 100).toFixed(2), amount: (c.amount / 100).toFixed(2) });
     ruleForm.elements.mode.value = r.mode;
     ruleForm.elements.fixed.value = (r.fixed / 100).toFixed(2);
     ruleForm.elements.multiplier.value = r.multiplier === null ? '' : String(r.multiplier / 10000);
@@ -212,7 +255,7 @@ $('#rules').addEventListener('click', event => {
     ruleForm.elements.vat.value = (r.vat / 100).toFixed(2);
     ruleForm.elements.addVat.checked = r.addVat; ruleExample();
   }
-  if (create) { ruleForm.reset(); ruleForm.elements.vendor.value = create.dataset.newRule; ruleForm.elements.multiplier.focus(); ruleExample(); }
+  if (create) { ruleForm.reset(); clearConditions(); ruleForm.elements.vendor.value = create.dataset.newRule; ruleForm.elements.multiplier.focus(); ruleExample(); }
   if (remove && confirm('Να διαγραφεί ο κανόνας ' + remove.dataset.deleteRule + '; Οι τιμές Shopify δεν αλλάζουν.')) action(remove, async () => { await api('rules/delete', { vendor: remove.dataset.deleteRule }); await load(); });
 });
 $('#settings-form').addEventListener('input', () => { settingsDirty = true; authFields(); });

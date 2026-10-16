@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { openStore } from './store.mjs';
 import { decimal, money, validateRule, calculate } from './pricing.mjs';
-import { QUERIES, validateSettings, createShopify } from './shopify.mjs';
+import { QUERIES, validateSettings, createShopify, collectionPages, productCollectionIds } from './shopify.mjs';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 const random = () => randomBytes(32).toString('hex');
@@ -16,7 +16,7 @@ const same = (a, b) => {
 };
 function fail(message, status = 400) { const error = new Error(message); error.status = status; throw error; }
 function fingerprint(v) {
-  return JSON.stringify([v.price, v.cost, v.currency, v.vendor, v.status, v.taxable, v.compareAt]);
+  return JSON.stringify([v.price, v.cost, v.currency, v.vendor, v.status, v.taxable, v.compareAt, v.collectionIds]);
 }
 function normalize(v) {
   return { id: v.id, productId: v.product.id, title: v.product.title, variant: v.title,
@@ -69,7 +69,7 @@ export function createApplication(config, dependencies = {}) {
   }
   function resultFor(v) {
     const rule = store.rules().find(r => r.vendor === v.vendor);
-    const result = calculate(v.cost, rule, v.taxable);
+    const result = calculate(v.cost, rule, v.taxable, v.collectionIds);
     if (v.currency && v.currency !== 'EUR') return { ...v, result: { error: 'Το κόστος δεν είναι σε EUR.' } };
     if (v.status === 'ARCHIVED') return { ...v, result: { error: 'Αρχειοθετημένο προϊόν.' } };
     if (!result.error && v.compareAt !== null && v.compareAt > 0 && result.final >= v.compareAt) result.error = 'Η προτεινόμενη τιμή φτάνει/ξεπερνά την Compare-at price. Έλεγξέ την πρώτα στο Shopify.';
@@ -88,11 +88,24 @@ export function createApplication(config, dependencies = {}) {
       after = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
       if (page.pageInfo.hasNextPage && !after) fail('Λείπει ο cursor σελιδοποίησης του Shopify.');
     } while (after);
+    const collections = await collectionPages(async after => (await api(QUERIES.collections, { after })).collections);
+    const ids = [...new Set(all.map(v => v.productId))], memberships = new Map();
+    for (let i = 0; i < ids.length; i += 10) {
+      const batch = ids.slice(i, i + 10);
+      const { nodes } = await api(QUERIES.memberships, { ids: batch });
+      for (const id of batch) {
+        const product = nodes.find(p => p?.id === id);
+        if (!product) fail('Προϊόν άλλαξε κατά τον συγχρονισμό. Δοκίμασε νέο συγχρονισμό.');
+        memberships.set(id, await productCollectionIds(api, id, product.collections));
+      }
+    }
+    all = all.map(v => ({ ...v, collectionIds: memberships.get(v.productId) }));
     db.exec('BEGIN');
     try {
       db.exec('DELETE FROM variants');
       const insert = db.prepare('INSERT INTO variants VALUES (?,?)');
       for (const v of all) insert.run(v.id, JSON.stringify(v));
+      store.put('collections', collections.sort((a, b) => a.title.localeCompare(b.title)));
       store.put('shopInfo', info); store.put('lastSync', new Date().toISOString()); invalidate();
       db.exec('COMMIT');
     } catch (error) { db.exec('ROLLBACK'); throw error; }
@@ -115,7 +128,9 @@ export function createApplication(config, dependencies = {}) {
           cost: fresh.inventoryItem.unitCost === null ? null : decimal(fresh.inventoryItem.unitCost.amount),
           currency: fresh.inventoryItem.unitCost?.currencyCode ?? null, taxable: fresh.taxable,
           vendor: fresh.product.vendor, status: fresh.product.status };
-        if (fresh.product.id !== item.productId || fingerprint(current) !== item.fingerprint) fail('Άλλαξαν τιμή, κόστος ή στοιχεία στο Shopify. Συγχρόνισε και κάνε νέα προεπισκόπηση.');
+        const rule = store.rules().find(r => r.vendor === cached.vendor);
+        if (rule.conditions.some(c => c.collectionId)) current.collectionIds = await productCollectionIds(api, item.productId);
+        if (fresh.product.id !== item.productId || fingerprint(current) !== item.fingerprint) fail('Άλλαξαν τιμή, κόστος, collections ή στοιχεία στο Shopify. Συγχρόνισε και κάνε νέα προεπισκόπηση.');
         sending = true;
         const payload = (await api(QUERIES.update, { productId: item.productId, variants: [{ id: item.id, price: money(item.newPrice) }] })).productVariantsBulkUpdate;
         if (payload.userErrors.length) { sending = false; fail(payload.userErrors.map(e => e.message).join('; ')); }
@@ -171,7 +186,7 @@ export function createApplication(config, dependencies = {}) {
           const s = store.settings();
           return json({ csrf: session.csrf, job: { ...job, costSaving }, lastSync: store.get('lastSync'), shopInfo: store.get('shopInfo'),
             settings: s ? { shop: s.shop, mode: s.mode, clientId: s.clientId, hasClientSecret: Boolean(s.clientSecret), hasAccessToken: Boolean(s.accessToken) } : null,
-            rules: store.rules(), vendors: [...new Set(store.variants().map(v => v.vendor))].sort(),
+            rules: store.rules(), collections: store.get('collections'), vendors: [...new Set(store.variants().map(v => v.vendor))].sort(),
             products: store.variants().map(resultFor), audit: db.prepare('SELECT * FROM audit ORDER BY id DESC LIMIT 200').all() });
         }
         if (req.method !== 'POST') fail('Δεν βρέθηκε.', 404);
@@ -189,6 +204,7 @@ export function createApplication(config, dependencies = {}) {
         }
         if (url.pathname === '/api/rules') {
           const rule = validateRule(input);
+          if (rule.conditions.some(c => c.collectionId && !store.get('collections').some(collection => collection.id === c.collectionId))) fail('Το collection δεν υπάρχει στον τελευταίο συγχρονισμό. Συγχρόνισε Shopify ή αφαίρεσέ το από τον όρο.');
           db.prepare('INSERT OR REPLACE INTO rules VALUES (?,?)').run(rule.vendor, JSON.stringify(rule)); invalidate(); return json({ ok: true });
         }
         if (url.pathname === '/api/rules/delete') { db.prepare('DELETE FROM rules WHERE vendor=?').run(String(input.vendor)); invalidate(); return json({ ok: true }); }

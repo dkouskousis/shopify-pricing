@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { decimal, calculate, validateRule, priceMultiplier } from '../pricing.mjs';
-const rule = (addVat = true) => validateRule({ vendor: 'Example', fixed: '0', mode: 'multiplier', multiplier: '1.55', vat: '24', addVat });
+const rule = (addVat = true) => validateRule({ vendor: 'Example', conditions: [], fixed: '0', mode: 'multiplier', multiplier: '1.55', vat: '24', addVat });
 test('upward rounding respects half-euro steps, the €20 boundary and exact prices', () => {
-  const identity = validateRule({ vendor: 'Test', fixed: '0', mode: 'multiplier', multiplier: '1', vat: '0', addVat: false });
+  const identity = validateRule({ vendor: 'Test', conditions: [], fixed: '0', mode: 'multiplier', multiplier: '1', vat: '0', addVat: false });
   for (const [cost, final] of [[1, 50], [812, 850], [850, 850], [851, 900], [1950, 1950], [1951, 2000], [1999, 2000], [2000, 2000], [2001, 2100], [2050, 2100], [12435, 12500], [12500, 12500]]) {
     assert.equal(calculate(cost, identity, false).final, final);
   }
@@ -17,15 +17,15 @@ test('upward rounding respects half-euro steps, the €20 boundary and exact pri
 test('simple formula: purchase cost × entered multiplier × optional VAT', () => {
   assert.equal(calculate(6000, rule()).final, 11600);
   assert.equal(calculate(6000, rule(false)).final, 9300);
-  assert.equal(calculate(6000, validateRule({ vendor: 'Example', fixed: '0', mode: 'multiplier', multiplier: '2', vat: '24', addVat: true })).final, 14900);
+  assert.equal(calculate(6000, validateRule({ vendor: 'Example', conditions: [], fixed: '0', mode: 'multiplier', multiplier: '2', vat: '24', addVat: true })).final, 14900);
 });
 test('disabling VAT addition does not imply tax exemption on sales', () => {
   assert.equal(calculate(6000, rule(false)).net, 7500);
   assert.equal(calculate(6000, rule(false), false).net, 9300);
 });
 test('upward price rounding preserves exact multiplier conversion', () => {
-  assert.equal(calculate(1, validateRule({ vendor: 'Test', fixed: '0', mode: 'multiplier', multiplier: '1.5', vat: '24', addVat: true })).final, 50);
-  assert.equal(calculate(6000, validateRule({ vendor: 'Test', fixed: '0', mode: 'multiplier', multiplier: '1.5457', vat: '24', addVat: true })).final, 11600);
+  assert.equal(calculate(1, validateRule({ vendor: 'Test', conditions: [], fixed: '0', mode: 'multiplier', multiplier: '1.5', vat: '24', addVat: true })).final, 50);
+  assert.equal(calculate(6000, validateRule({ vendor: 'Test', conditions: [], fixed: '0', mode: 'multiplier', multiplier: '1.5457', vat: '24', addVat: true })).final, 11600);
   assert.equal(priceMultiplier('1,55'), 15500);
   assert.equal(decimal('12,50'), 1250);
 });
@@ -38,31 +38,31 @@ test('missing and invalid input never silently becomes zero', () => {
 });
 
 test('gross profit and gross margin are based on the proposed net selling price', () => {
-  const result = calculate(12395, validateRule({ vendor: 'Example', fixed: '0', mode: 'multiplier', multiplier: '1.4', vat: '24', addVat: true }));
+  const result = calculate(12395, validateRule({ vendor: 'Example', conditions: [], fixed: '0', mode: 'multiplier', multiplier: '1.4', vat: '24', addVat: true }));
   assert.equal(result.final, 21600);
   assert.equal(result.profit, 5024);
   assert.equal(result.margin, 28.84);
 });
 test('margin mode targets net sales margin instead of purchase markup', () => {
-  const rule = validateRule({ vendor: 'Example', fixed: '0', mode: 'margin', targetMargin: '40', vat: '24', addVat: true });
+  const rule = validateRule({ vendor: 'Example', conditions: [], fixed: '0', mode: 'margin', targetMargin: '40', vat: '24', addVat: true });
   const result = calculate(6000, rule);
   assert.equal(rule.multiplier, null);
   assert.equal(result.final, 12400);
   assert.equal(result.net, 10000);
   assert.equal(result.profit, 4000);
   assert.equal(result.margin, 40);
-  const markedUp = calculate(6000, validateRule({ vendor: 'Example', fixed: '0', mode: 'multiplier', multiplier: '1.4', vat: '24', addVat: true }));
+  const markedUp = calculate(6000, validateRule({ vendor: 'Example', conditions: [], fixed: '0', mode: 'multiplier', multiplier: '1.4', vat: '24', addVat: true }));
   assert.equal(markedUp.final, 10500);
   assert.equal(markedUp.margin, 29.15);
 });
 test('margin mode preserves optional VAT behavior and distinguishes taxable sales', () => {
-  const rule = validateRule({ vendor: 'Example', fixed: '0', mode: 'margin', targetMargin: '40', vat: '24', addVat: false });
+  const rule = validateRule({ vendor: 'Example', conditions: [], fixed: '0', mode: 'margin', targetMargin: '40', vat: '24', addVat: false });
   assert.equal(calculate(6000, rule).final, 10000);
   assert.equal(calculate(6000, rule).margin, 25.6);
   assert.equal(calculate(6000, rule, false).margin, 40);
 });
 test('margin validation accepts zero and decimals, rejects 100% and malformed inputs', () => {
-  const input = { vendor: 'Example', fixed: '0', mode: 'margin', vat: '24', addVat: true };
+  const input = { vendor: 'Example', conditions: [], fixed: '0', mode: 'margin', vat: '24', addVat: true };
   assert.equal(calculate(6000, validateRule({ ...input, targetMargin: '0' })).final, 7500);
   assert.equal(validateRule({ ...input, targetMargin: '33,33' }).targetMargin, 3333);
   assert.equal(calculate(1, validateRule({ ...input, targetMargin: '99.99' })).final, 12400);
@@ -70,7 +70,7 @@ test('margin validation accepts zero and decimals, rejects 100% and malformed in
   assert.throws(() => validateRule({ ...input, mode: 'unknown', targetMargin: '40' }));
 });
 test('fixed addition comes after multiplication and before optional VAT', () => {
-  const input = { vendor: 'Example', mode: 'multiplier', multiplier: '1.4', fixed: '10', vat: '24', addVat: true };
+  const input = { vendor: 'Example', conditions: [], mode: 'multiplier', multiplier: '1.4', fixed: '10', vat: '24', addVat: true };
   const result = calculate(6000, validateRule(input));
   assert.equal(result.final, 11700);
   assert.equal(result.net, 9435);
@@ -80,9 +80,53 @@ test('fixed addition comes after multiplication and before optional VAT', () => 
   assert.throws(() => validateRule({ ...input, fixed: '-1' }));
 });
 test('fixed addition applies after the base margin price and updates actual gross margin', () => {
-  const rule = validateRule({ vendor: 'Example', mode: 'margin', targetMargin: '40', fixed: '10', vat: '24', addVat: true });
+  const rule = validateRule({ vendor: 'Example', conditions: [], mode: 'margin', targetMargin: '40', fixed: '10', vat: '24', addVat: true });
   const result = calculate(6000, rule);
   assert.equal(result.final, 13700);
   assert.equal(result.profit, 5048);
   assert.equal(result.margin, 45.69);
+});
+
+test('conditions use one rounded reference price, sum overlaps and never cascade', () => {
+  const conditions = [
+    { from: '0', to: '50', amount: '2', collectionId: '' },
+    { from: '50', to: '60', amount: '3', collectionId: '' },
+    { from: '55', to: '100', amount: '10', collectionId: '' },
+  ];
+  const r = validateRule({ vendor: 'Test', mode: 'multiplier', multiplier: '1', fixed: '0', vat: '24', addVat: false, conditions });
+  assert.equal(calculate(4950, r).referencePrice, 5000);
+  assert.equal(calculate(4950, r).fixed, 500);
+  assert.equal(calculate(4950, r).final, 5500);
+  assert.equal(calculate(4950, { ...r, conditions: [...r.conditions].reverse() }).final, 5500);
+  assert.equal(calculate(5001, r).fixed, 300);
+  assert.equal(calculate(6100, r).fixed, 1000);
+});
+test('collection and price must both match, and total includes unconditional fixed amount', () => {
+  const collectionId = 'gid://shopify/Collection/1';
+  const r = validateRule({ vendor: 'Test', mode: 'margin', targetMargin: '40', fixed: '1', vat: '24', addVat: true, conditions: [
+    { from: '300', to: '999', amount: '25', collectionId },
+    { from: '300', to: '999', amount: '2', collectionId: '' },
+  ] });
+  const result = calculate(18000, r, true, [collectionId]);
+  assert.equal(result.referencePrice, 37400); // (€300 + €1) × 1.24 → €374
+  assert.equal(result.fixed, 2800);
+  assert.equal(result.final, 40700); // (€300 + €28) × 1.24 → €407
+  assert.equal(calculate(18000, r, true, []).fixed, 300);
+  assert.equal(calculate(6000, r, true, [collectionId]).fixed, 100);
+  assert.match(calculate(18000, r).error, /συγχρονισμό/);
+});
+test('condition amounts go before optional VAT and final rounding, including small prices', () => {
+  const r = validateRule({ vendor: 'Test', mode: 'multiplier', multiplier: '1', fixed: '0', vat: '24', addVat: true, conditions: [{ from: '0', to: '50', amount: '2', collectionId: '' }] });
+  assert.equal(calculate(1000, r).referencePrice, 1250);
+  assert.equal(calculate(1000, r).final, 1500);
+  assert.equal(calculate(1000, { ...r, addVat: false }).final, 1200);
+  assert.equal(calculate(1000, r).fixed, 200);
+});
+test('condition validation rejects malformed ranges, amounts, IDs and oversized lists', () => {
+  const input = { vendor: 'Test', mode: 'multiplier', multiplier: '1', fixed: '0', vat: '24', addVat: true };
+  const good = { from: '0', to: '50', amount: '2', collectionId: '' };
+  for (const bad of [{ from: '' }, { to: '' }, { from: '51' }, { amount: '-1' }, { amount: '' }, { collectionId: 'Sleep' }, { collectionId: null }]) assert.throws(() => validateRule({ ...input, conditions: [{ ...good, ...bad }] }));
+  assert.throws(() => validateRule({ ...input, conditions: Array(51).fill(good) }));
+  assert.throws(() => validateRule({ ...input, conditions: null }));
+  assert.equal(validateRule({ ...input, conditions: [{ ...good, from: '50', to: '50' }] }).conditions[0].from, 5000);
 });
