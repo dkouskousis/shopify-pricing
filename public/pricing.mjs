@@ -22,6 +22,7 @@ export function validateRule(input) {
   return {
     mode: input.mode,
     targetMargin,
+    fixed: input.fixed === '' ? 0 : decimal(input.fixed, 'Σταθερό ποσό €', 100000),
     vendor: input.vendor.trim(),
     multiplier: input.mode === 'multiplier' ? priceMultiplier(input.multiplier) : null,
     vat: decimal(input.vat, 'Συντελεστής ΦΠΑ', 100),
@@ -35,7 +36,7 @@ export function calculate(cost, rule, taxable = true) {
   // Keep the base-price ratio exact, including recurring margin divisions.
   const numerator = BigInt(cost) * BigInt(rule.mode === 'margin' ? 10000 : rule.multiplier);
   const denominator = BigInt(rule.mode === 'margin' ? 10000 - rule.targetMargin : 10000);
-  const final = Number(roundDivide(numerator * BigInt(rule.addVat ? 10000 + rule.vat : 10000), denominator * 10000n));
+  const final = Number(roundDivide((numerator + BigInt(rule.fixed) * denominator) * BigInt(rule.addVat ? 10000 + rule.vat : 10000), denominator * 10000n));
   const net = Number(roundDivide(BigInt(final) * 10000n, BigInt(taxable ? 10000 + rule.vat : 10000)));
   const profit = net - cost;
   return { final, net, profit, margin: net ? Math.round(profit / net * 10000) / 100 : 0 };

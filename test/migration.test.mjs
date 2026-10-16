@@ -20,7 +20,7 @@ test('v1 rules migrate once, keep credentials/data and back up removed flat amou
     old.prepare('INSERT INTO meta VALUES (?,?)').run('lastSync', JSON.stringify('previous-sync'));
     old.close();
     const key = 'ab'.repeat(32), current = openStore(path, key);
-    assert.deepEqual(current.rules(), [{ vendor: 'Example', multiplier: 15457, vat: 2400, addVat: true, mode: 'multiplier', targetMargin: null }]);
+    assert.deepEqual(current.rules(), [{ vendor: 'Example', multiplier: 15457, vat: 2400, addVat: true, mode: 'multiplier', targetMargin: null, fixed: 0 }]);
     assert.equal(current.get('lastSync'), 'previous-sync');
     assert.equal(current.get('legacyPricingV1').extras[0].amount, 2500);
     assert.equal(current.db.prepare('SELECT count(*) AS n FROM previews').get().n, 0);
@@ -40,12 +40,30 @@ test('v1.2 rules migrate to multiplier mode once without changing the chosen fac
     initial.db.prepare('INSERT INTO rules VALUES (?,?)').run('Existing', JSON.stringify({ vendor: 'Existing', multiplier: 15457, vat: 2400, addVat: false }));
     initial.db.exec('PRAGMA user_version=3'); initial.db.close();
     const migrated = openStore(path, key);
-    assert.deepEqual(migrated.rules()[0], { vendor: 'Existing', multiplier: 15457, vat: 2400, addVat: false, mode: 'multiplier', targetMargin: null });
+    assert.deepEqual(migrated.rules()[0], { vendor: 'Existing', multiplier: 15457, vat: 2400, addVat: false, mode: 'multiplier', targetMargin: null, fixed: 0 });
     migrated.db.prepare('UPDATE rules SET data=? WHERE vendor=?').run(JSON.stringify({ vendor: 'Existing', mode: 'margin', multiplier: null, targetMargin: 4000, vat: 2400, addVat: true }), 'Existing');
     migrated.db.close();
     const reopened = openStore(path, key);
     assert.equal(reopened.rules()[0].mode, 'margin');
     assert.equal(reopened.rules()[0].targetMargin, 4000);
+    reopened.db.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+test('fixed amounts default to zero on upgrade and retain later saved values', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pricing-fixed-')), path = join(dir, 'test.sqlite');
+  try {
+    const key = 'ab'.repeat(32), initial = openStore(path, key);
+    initial.db.prepare('INSERT INTO rules VALUES (?,?)').run('Existing', JSON.stringify({ vendor: 'Existing', mode: 'margin', multiplier: null, targetMargin: 4000, vat: 2400, addVat: true }));
+    initial.db.exec('PRAGMA user_version=4'); initial.db.close();
+    const migrated = openStore(path, key);
+    assert.equal(migrated.rules()[0].fixed, 0);
+    assert.equal(migrated.rules()[0].mode, 'margin');
+    assert.equal(migrated.rules()[0].targetMargin, 4000);
+    const rule = { ...migrated.rules()[0], fixed: 1000 };
+    migrated.db.prepare('UPDATE rules SET data=? WHERE vendor=?').run(JSON.stringify(rule), 'Existing');
+    migrated.db.close();
+    const reopened = openStore(path, key);
+    assert.equal(reopened.rules()[0].fixed, 1000);
     reopened.db.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

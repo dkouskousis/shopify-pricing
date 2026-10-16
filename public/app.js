@@ -55,10 +55,11 @@ function renderProducts() {
     <td class="number">${euros(p.price)}${p.compareAt ? `<small>Compare-at: ${euros(p.compareAt)}</small>` : ''}</td>
     <td class="number new-price">${p.result.error ? '—' : euros(p.result.final)}</td>
     <td class="number ${gainPercent < 0 ? 'negative' : ''}">${gainPercent === null ? '—' : pct(gainPercent)}${rule?.mode === 'margin' ? `<small>Στόχος περιθωρίου ${pct(rule.targetMargin / 100)}</small>` : ''}</td>
+    <td class="number">${euros(rule ? rule.fixed : 0)}</td>
     <td class="number">${vatPercent === null ? '—' : pct(vatPercent)}</td>
     <td class="number ${p.result.profit < 0 ? 'negative' : ''}">${p.result.error ? '—' : euros(p.result.profit)}</td>
     <td class="number ${p.result.margin < 0 ? 'negative' : ''}">${p.result.error ? '—' : pct(p.result.margin)}</td></tr>`;
-  }).join('') : '<tr><td colspan="9" class="empty">Δεν υπάρχουν προϊόντα. Κάνε συγχρονισμό ή άλλαξε τα φίλτρα.</td></tr>';
+  }).join('') : '<tr><td colspan="10" class="empty">Δεν υπάρχουν προϊόντα. Κάνε συγχρονισμό ή άλλαξε τα φίλτρα.</td></tr>';
   $('#page-label').textContent = `Σελίδα ${page + 1} / ${pageCount} · ${all.length} παραλλαγές`;
   $('#previous').disabled = page === 0; $('#next').disabled = page >= pageCount - 1;
   const selectable = visible.filter(eligible);
@@ -68,7 +69,7 @@ function renderProducts() {
 }
 function renderRules() {
   $('#vendors-list').innerHTML = state.vendors.map(v => `<option value="${escape(v)}"></option>`).join('');
-  $('#rule-list').innerHTML = state.rules.length ? state.rules.map(r => `<div class="rule-card"><div><strong>${escape(r.vendor)}</strong><p><span class="rule-type">${r.mode === 'margin' ? 'Περιθώριο ' + pct(r.targetMargin / 100) : 'Συντελεστής ×' + escape(new Intl.NumberFormat('el-GR', { maximumFractionDigits: 4 }).format(r.multiplier / 10000))}</span> · ${r.addVat ? 'με προσθήκη ΦΠΑ ' + pct(r.vat / 100) : 'χωρίς προσθήκη ΦΠΑ'}</p></div><div class="actions"><button class="quiet" data-edit-rule="${escape(r.vendor)}">Επεξεργασία</button><button class="quiet" data-delete-rule="${escape(r.vendor)}" aria-label="Διαγραφή κανόνα ${escape(r.vendor)}">×</button></div></div>`).join('') : '<p class="muted">Δεν έχουν οριστεί κανόνες.</p>';
+  $('#rule-list').innerHTML = state.rules.length ? state.rules.map(r => `<div class="rule-card"><div><strong>${escape(r.vendor)}</strong><p><span class="rule-type">${r.mode === 'margin' ? 'Περιθώριο ' + pct(r.targetMargin / 100) : 'Συντελεστής ×' + escape(new Intl.NumberFormat('el-GR', { maximumFractionDigits: 4 }).format(r.multiplier / 10000))}</span> · +${euros(r.fixed)} πριν τον ΦΠΑ · ${r.addVat ? 'με προσθήκη ΦΠΑ ' + pct(r.vat / 100) : 'χωρίς προσθήκη ΦΠΑ'}</p></div><div class="actions"><button class="quiet" data-edit-rule="${escape(r.vendor)}">Επεξεργασία</button><button class="quiet" data-delete-rule="${escape(r.vendor)}" aria-label="Διαγραφή κανόνα ${escape(r.vendor)}">×</button></div></div>`).join('') : '<p class="muted">Δεν έχουν οριστεί κανόνες.</p>';
   const missing = state.vendors.filter(v => !state.rules.some(r => r.vendor === v));
   $('#unconfigured').innerHTML = missing.length ? missing.map(v => `<button class="quiet" data-new-rule="${escape(v)}">${escape(v || '(κενό Vendor στο Shopify)')}</button>`).join(' ') : '<p class="muted">Όλοι οι συγχρονισμένοι προμηθευτές έχουν κανόνα.</p>';
 }
@@ -167,12 +168,12 @@ function ruleExample() {
   ruleForm.elements.multiplier.disabled = marginMode; ruleForm.elements.multiplier.required = !marginMode;
   ruleForm.elements.targetMargin.disabled = !marginMode; ruleForm.elements.targetMargin.required = marginMode;
   $('#rule-formula').textContent = marginMode
-    ? 'Αγορά ÷ (1 − μικτό περιθώριο / 100) × προαιρετικός ΦΠΑ'
-    : 'Αγορά × συντελεστής × προαιρετικός ΦΠΑ';
+    ? '(Αγορά ÷ (1 − μικτό περιθώριο / 100) + σταθερό ποσό) × προαιρετικός ΦΠΑ'
+    : '(Αγορά × συντελεστής + σταθερό ποσό) × προαιρετικός ΦΠΑ';
   try {
     const rule = validateRule({ vendor: 'Παράδειγμα', mode: ruleForm.elements.mode.value,
       multiplier: ruleForm.elements.multiplier.value, targetMargin: ruleForm.elements.targetMargin.value,
-      addVat: ruleForm.elements.addVat.checked, vat: ruleForm.elements.vat.value });
+      fixed: ruleForm.elements.fixed.value, addVat: ruleForm.elements.addVat.checked, vat: ruleForm.elements.vat.value });
     const cost = decimal($('#example-cost').value, 'Δοκιμαστική αγορά');
     const result = calculate(cost, rule);
     if (result.error) throw new Error(result.error);
@@ -180,7 +181,7 @@ function ruleExample() {
     const base = marginMode
       ? `${euros(cost)} ÷ (1 − ${format(rule.targetMargin / 100)} / 100)`
       : `${euros(cost)} × ${format(rule.multiplier / 10000)}`;
-    $('#rule-example').textContent = `${base} × ${format(rule.addVat ? 1 + rule.vat / 10000 : 1)} = ${euros(result.final)}`;
+    $('#rule-example').textContent = `(${base} + ${euros(rule.fixed)}) × ${format(rule.addVat ? 1 + rule.vat / 10000 : 1)} = ${euros(result.final)}`;
     $('#example-final').textContent = euros(result.final);
     $('#example-profit').textContent = euros(result.profit);
     $('#example-margin').textContent = pct(result.margin);
@@ -205,6 +206,7 @@ $('#rules').addEventListener('click', event => {
     const r = state.rules.find(r => r.vendor === edit.dataset.editRule);
     ruleForm.elements.vendor.value = r.vendor;
     ruleForm.elements.mode.value = r.mode;
+    ruleForm.elements.fixed.value = (r.fixed / 100).toFixed(2);
     ruleForm.elements.multiplier.value = r.multiplier === null ? '' : String(r.multiplier / 10000);
     ruleForm.elements.targetMargin.value = r.targetMargin === null ? '40' : String(r.targetMargin / 100);
     ruleForm.elements.vat.value = (r.vat / 100).toFixed(2);

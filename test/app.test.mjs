@@ -10,7 +10,7 @@ const id = n => `gid://shopify/ProductVariant/${n}`;
 function variant(n, price = '100.00', cost = '60.00') {
   return { id: id(n), title: 'Medium', price, compareAtPrice: null, taxable: true,
     inventoryItem: { id: 'gid://shopify/InventoryItem/' + n, sku: 'TEST-' + n, unitCost: cost === null ? null : { amount: cost, currencyCode: 'EUR' } },
-    product: { id: 'gid://shopify/Product/9', title: 'Test product ' + n, vendor: 'Example', status: 'ACTIVE' } };
+    product: { id: 'gid://shopify/Product/9', title: 'Test product ' + n, vendor: 'Example', fixed: '0', status: 'ACTIVE' } };
 }
 async function harness(t, variants = [variant(1)]) {
   let mutations = [], costMutations = [], pages = 0, pageError = false, mutationError = false, costFailure = null;
@@ -62,7 +62,7 @@ async function harness(t, variants = [variant(1)]) {
   async function setup() {
     await login();
     assert.equal((await request('settings', { shop: 'example.myshopify.com', mode: 'access_token', clientId: '', clientSecret: '', accessToken: 'private-token' })).status, 200);
-    assert.equal((await request('rules', { vendor: 'Example', mode: 'multiplier', multiplier: '1.55', vat: '24', addVat: true })).status, 200);
+    assert.equal((await request('rules', { vendor: 'Example', fixed: '0', mode: 'multiplier', multiplier: '1.55', vat: '24', addVat: true })).status, 200);
     assert.equal((await request('sync', {})).status, 202); await idle();
   }
   return { app, request, setup, login, idle, mutations, costMutations, setCostFailure: value => { costFailure = value; }, setPageError: () => { pageError = true; }, setMutationError: () => { mutationError = true; }, pages: () => pages };
@@ -114,7 +114,7 @@ test('changed Shopify cost/price rejects a stale update and logs failure', async
 test('rule edits invalidate saved previews', async t => {
   const h = await harness(t); await h.setup();
   const p = (await h.request('preview', { ids: [id(1)] })).data;
-  await h.request('rules', { vendor: 'Example', mode: 'multiplier', multiplier: '1.60', vat: '24', addVat: true });
+  await h.request('rules', { vendor: 'Example', fixed: '0', mode: 'multiplier', multiplier: '1.60', vat: '24', addVat: true });
   assert.equal((await h.request('apply', { id: p.id })).status, 409);
   assert.equal((await h.request('state')).data.products[0].result.final, 11904);
 });
@@ -139,7 +139,7 @@ test('expired previews are rejected and rule edits invalidate fresh previews', a
   h.app.store.db.prepare('UPDATE previews SET expires=0 WHERE id=?').run(p.id);
   assert.equal((await h.request('apply', { id: p.id })).status, 409);
   const p2 = (await h.request('preview', { ids: [id(1)] })).data;
-  await h.request('rules', { vendor: 'Example', mode: 'multiplier', multiplier: '1.60', vat: '24', addVat: true });
+  await h.request('rules', { vendor: 'Example', fixed: '0', mode: 'multiplier', multiplier: '1.60', vat: '24', addVat: true });
   assert.equal((await h.request('apply', { id: p2.id })).status, 409);
 });
 test('credential encryption round-trips and does not expose the plaintext', () => {
@@ -210,7 +210,7 @@ test('failed or uncertain cost writes do not become successful local costs', asy
 });
 test('margin rules persist, preview and apply the intended price, then recalculate after cost edits', async t => {
   const h = await harness(t); await h.setup();
-  const result = await h.request('rules', { vendor: 'Example', mode: 'margin', targetMargin: '40', vat: '24', addVat: true });
+  const result = await h.request('rules', { vendor: 'Example', fixed: '0', mode: 'margin', targetMargin: '40', vat: '24', addVat: true });
   assert.equal(result.status, 200);
   const state = (await h.request('state')).data;
   assert.equal(state.rules[0].mode, 'margin');
@@ -223,4 +223,14 @@ test('margin rules persist, preview and apply the intended price, then recalcula
   const after = (await h.request('state')).data;
   assert.equal(after.products[0].result.final, 13433);
   assert.equal(after.products[0].result.margin, 40);
+});
+test('fixed rule amount persists and flows through preview and Shopify price apply', async t => {
+  const h = await harness(t); await h.setup();
+  const response = await h.request('rules', { vendor: 'Example', mode: 'multiplier', multiplier: '1.4', fixed: '10', vat: '24', addVat: true });
+  assert.equal(response.status, 200);
+  assert.equal((await h.request('state')).data.rules[0].fixed, 1000);
+  const plan = (await h.request('preview', { ids: [id(1)] })).data;
+  assert.equal(plan.items[0].newPrice, 11656);
+  await h.request('apply', { id: plan.id }); await h.idle();
+  assert.equal(h.mutations[0].variants[0].price, '116.56');
 });
