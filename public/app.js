@@ -32,7 +32,7 @@ function tab(name) {
 function filtered() {
   return filterProducts(state.products, {
     search: $('#search').value, vendor: $('#vendor').value, change: $('#filter').value,
-    status: $('#status-filter').value, price: $('#price-filter').value,
+    status: $('#status-filter').value, price: $('#price-filter').value, cost: $('#cost-filter').value,
   });
 }
 function eligible(p) { return !p.result.error && p.result.final !== p.price; }
@@ -113,7 +113,7 @@ $('#logout').addEventListener('click', event => action(event.currentTarget, asyn
   await api('logout', {}); clearTimeout(timer); state = null; selected.clear(); $('#workspace').hidden = true; $('#login').hidden = false;
 }));
 document.querySelectorAll('nav button').forEach(button => button.addEventListener('click', () => tab(button.dataset.tab)));
-for (const selector of ['#search', '#vendor', '#filter', '#status-filter', '#price-filter']) $(selector).addEventListener(selector === '#search' ? 'input' : 'change', () => { page = 0; renderProducts(); });
+for (const selector of ['#search', '#vendor', '#filter', '#status-filter', '#price-filter', '#cost-filter']) $(selector).addEventListener(selector === '#search' ? 'input' : 'change', () => { page = 0; renderProducts(); });
 $('#previous').addEventListener('click', () => { page--; renderProducts(); });
 $('#next').addEventListener('click', () => { page++; renderProducts(); });
 $('#product-rows').addEventListener('change', event => {
