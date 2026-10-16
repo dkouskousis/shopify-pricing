@@ -136,3 +136,19 @@ test('no conditions means no addition, even if a removed legacy field is submitt
   assert.equal(calculate(6000, r).fixed, 0);
   assert.equal(calculate(6000, r).final, 7500);
 });
+
+test('price outside all charge ranges still gets the brand calculation without collections data', () => {
+  const input = { vendor: 'Test', mode: 'multiplier', multiplier: '1.4', vat: '24', addVat: true,
+    conditions: [{ from: '300', to: '999', amount: '25', collectionId: 'gid://shopify/Collection/1' }] };
+  const r = validateRule(input);
+  const outside = calculate(6000, r, true, null);
+  assert.equal(outside.final, 10500);
+  assert.equal(outside.fixed, 0);
+  assert.equal(outside.requiresCollections, false);
+  assert.equal(calculate(6000, { ...r, addVat: false }, true, null).final, 8400);
+  assert.equal(calculate(6000, { ...r, mode: 'margin', targetMargin: 4000, multiplier: null }, true, null).final, 12400);
+  assert.match(calculate(30000, r, true, null).error, /συγχρονισμό/);
+  const nonMember = calculate(30000, r, true, []);
+  assert.equal(nonMember.final, 52100);
+  assert.equal(nonMember.fixed, 0);
+});

@@ -40,7 +40,7 @@
           <div id="margin-fields" hidden><label>Στόχος μικτού περιθωρίου (%)<input name="targetMargin" inputmode="decimal" value="40" placeholder="π.χ. 40" disabled></label><p class="footnote">Μικτό περιθώριο 40% σημαίνει ότι από κάθε 100€ καθαρής πώλησης μένουν 40€, πριν από τα υπόλοιπα έξοδα.</p></div>
           <section class="conditions-panel" aria-labelledby="conditions-title">
             <div class="section-head"><h3 id="conditions-title">Προσθήκες με όρους</h3><button id="add-condition" type="button" class="quiet">+ Προσθήκη όρου</button></div>
-            <p class="footnote">Κάθε όρος ελέγχει τη νέα τιμή πώλησης μετά τον ΦΠΑ και τη στρογγυλοποίηση, πριν από τις προσθήκες των όρων. Τα όρια περιλαμβάνονται. Όλοι οι όροι που ταιριάζουν αθροίζονται· τα ποσά προστίθενται πριν τον ΦΠΑ.</p>
+            <p class="footnote">Κάθε όρος ελέγχει τη νέα τιμή πώλησης μετά τον ΦΠΑ και τη στρογγυλοποίηση, πριν από τις προσθήκες των όρων. Οι όροι αφορούν μόνο την πρόσθετη χρέωση. Αν κανένας δεν ταιριάζει, η βασική τιμή του brand υπολογίζεται κανονικά με προσθήκη 0€. Τα όρια περιλαμβάνονται. Όλοι οι όροι που ταιριάζουν αθροίζονται· τα ποσά προστίθενται πριν τον ΦΠΑ.</p>
             <div id="condition-rows"></div><p id="conditions-empty" class="muted">Δεν υπάρχουν όροι. Δεν προστίθεται κανένα σταθερό ποσό.</p>
             <p class="footnote">Τα collections φορτώνονται με τον συγχρονισμό Shopify. Η επιλογή «Όλα τα collections» δεν απαιτεί συμμετοχή σε collection.</p>
           </section>
@@ -72,7 +72,7 @@
         <div class="section-head"><div><h2>Ιστορικό ενημερώσεων</h2><p class="muted">Οι τελευταίες 200 απόπειρες ενημέρωσης τιμής ή κόστους. Οι επιτυχίες και οι αποτυχίες καταγράφονται ξεχωριστά.</p></div></div>
         <div class="table-wrap"><table><thead><tr><th>Ημερομηνία</th><th>Ενέργεια</th><th>Προϊόν</th><th>Πριν</th><th>Μετά</th><th>Αποτέλεσμα</th></tr></thead><tbody id="audit-rows"></tbody></table></div>
       </section>
-    </main><footer>Shopify Pricing <span>v1.6.1 · Ιδιωτική διαχείριση τιμών</span></footer>
+    </main><footer>Shopify Pricing <span>v1.6.2 · Ιδιωτική διαχείριση τιμών</span></footer>
   </div>
   <dialog id="cost-dialog">
     <div class="section-head"><div><span class="eyebrow">ΤΙΜΗ ΑΓΟΡΑΣ</span><h2>Επεξεργασία κόστους</h2></div><button id="close-cost" class="quiet">Κλείσιμο</button></div>

@@ -48,7 +48,6 @@ export function calculate(cost, rule, taxable = true, collectionIds = null) {
   if (cost === null || cost === undefined) return { error: 'Λείπει το κόστος αγοράς στο Shopify.' };
   if (!rule) return { error: 'Λείπει ο κανόνας προμηθευτή.' };
   if (!Number.isSafeInteger(cost) || cost <= 0) return { error: 'Το κόστος αγοράς πρέπει να είναι μεγαλύτερο από μηδέν.' };
-  if (rule.conditions.some(c => c.collectionId) && !Array.isArray(collectionIds)) return { error: 'Κάνε συγχρονισμό Shopify για τα collections πριν υπολογιστούν οι όροι.' };
   // Keep the base-price ratio exact, including recurring margin divisions.
   const numerator = BigInt(cost) * BigInt(rule.mode === 'margin' ? 10000 : rule.multiplier);
   const denominator = BigInt(rule.mode === 'margin' ? 10000 - rule.targetMargin : 10000);
@@ -58,10 +57,12 @@ export function calculate(cost, rule, taxable = true, collectionIds = null) {
   // Every condition sees the same rounded base sale price. Additions cannot
   // trigger another condition, regardless of row order. Bounds are inclusive.
   const referencePrice = roundedPrice(baseNumerator, totalDenominator);
-  const fixed = rule.conditions.filter(c => referencePrice >= c.from && referencePrice <= c.to
-    && (!c.collectionId || collectionIds.includes(c.collectionId))).reduce((sum, c) => sum + c.amount, 0);
+  const priceConditions = rule.conditions.filter(c => referencePrice >= c.from && referencePrice <= c.to);
+  const requiresCollections = priceConditions.some(c => c.collectionId);
+  if (requiresCollections && !Array.isArray(collectionIds)) return { error: 'Κάνε συγχρονισμό Shopify για τα collections πριν υπολογιστούν οι όροι.' };
+  const fixed = priceConditions.filter(c => !c.collectionId || collectionIds.includes(c.collectionId)).reduce((sum, c) => sum + c.amount, 0);
   const final = roundedPrice((numerator + BigInt(fixed) * denominator) * vatFactor, totalDenominator);
   const net = Number(roundDivide(BigInt(final) * 10000n, BigInt(taxable ? 10000 + rule.vat : 10000)));
   const profit = net - cost;
-  return { final, net, profit, margin: net ? Math.round(profit / net * 10000) / 100 : 0, fixed, referencePrice };
+  return { final, net, profit, margin: net ? Math.round(profit / net * 10000) / 100 : 0, fixed, referencePrice, requiresCollections };
 }

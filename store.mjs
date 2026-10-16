@@ -85,6 +85,9 @@ export function openStore(path, encryptionKey) {
       db.exec('DELETE FROM previews; PRAGMA user_version=8; COMMIT');
     } catch (error) { db.exec('ROLLBACK'); throw error; }
   }
+  if (db.prepare('PRAGMA user_version').get().user_version < 9) {
+    db.exec('BEGIN; DELETE FROM previews; PRAGMA user_version=9; COMMIT');
+  }
   // Interrupted writes may have reached Shopify. Never automatically repeat them.
   db.prepare("UPDATE audit SET status='uncertain',detail='Η εφαρμογή επανεκκινήθηκε κατά την ενημέρωση. Συγχρόνισε και έλεγξε την τιμή ή το κόστος.' WHERE status='pending'").run();
   const key = Buffer.from(encryptionKey, 'hex');

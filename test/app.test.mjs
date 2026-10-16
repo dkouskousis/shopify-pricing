@@ -243,7 +243,7 @@ test('small product price uses half-euro rounding consistently through Shopify a
   const h = await harness(t, [variant(1, '8.00', '8.12')]); await h.setup();
   await h.request('rules', { vendor: 'Example', conditions: [], mode: 'multiplier', multiplier: '1', vat: '0', addVat: false });
   const state = (await h.request('state')).data;
-  assert.deepEqual(state.products[0].result, { final: 850, net: 850, profit: 38, margin: 4.47, fixed: 0, referencePrice: 850 });
+  assert.deepEqual(state.products[0].result, { final: 850, net: 850, profit: 38, margin: 4.47, fixed: 0, referencePrice: 850, requiresCollections: false });
   const plan = (await h.request('preview', { ids: [id(1)] })).data;
   assert.equal(plan.items[0].newPrice, 850);
   await h.request('apply', { id: plan.id }); await h.idle();
@@ -297,4 +297,42 @@ test('failed collections sync keeps previous variants, collections and timestamp
   assert.equal(after.products[0].cost, 6000);
   assert.deepEqual(after.collections, before.collections);
   assert.equal(after.lastSync, before.lastSync);
+});
+
+test('one preview applies both products inside and outside additional charge ranges', async t => {
+  for (const settings of [
+    { mode: 'multiplier', multiplier: '1.55', addVat: true, prices: ['116.00', '608.00'] },
+    { mode: 'multiplier', multiplier: '1.55', addVat: false, prices: ['93.00', '490.00'] },
+    { mode: 'margin', targetMargin: '40', addVat: true, prices: ['124.00', '651.00'] },
+  ]) await t.test(`${settings.mode}, addVat=${settings.addVat}`, async t => {
+    const h = await harness(t, [variant(1, '100', '60'), variant(2, '100', '300')]); await h.setup();
+    await h.request('rules', { vendor: 'Example', ...settings, vat: '24',
+      conditions: [{ from: '300', to: '999', amount: '25', collectionId: 'gid://shopify/Collection/1' }] });
+    // A price outside the charge band does not depend on any collection data.
+    const uncharged = h.app.store.variant(id(1));
+    h.app.store.db.prepare('UPDATE variants SET data=? WHERE id=?').run(JSON.stringify({ ...uncharged, collectionIds: null }), id(1));
+    const state = (await h.request('state')).data;
+    assert.equal(state.products[0].result.fixed, 0);
+    assert.equal(state.products[1].result.fixed, 2500);
+    const plan = (await h.request('preview', { ids: [id(1), id(2)] })).data;
+    assert.equal(plan.items.length, 2);
+    assert.equal(plan.items[0].checkCollections, false);
+    assert.equal(plan.items[1].checkCollections, true);
+    await h.request('apply', { id: plan.id }); const after = await h.idle();
+    assert.deepEqual(h.mutations.map(m => m.variants[0].price), settings.prices);
+    assert.ok(after.audit.every(a => a.status === 'success'));
+  });
+});
+test('a known non-member product within a charge range still receives the base price', async t => {
+  const h = await harness(t, [variant(1, '100', '300')]); await h.setup();
+  h.setCollections([]);
+  const v = h.app.store.variant(id(1));
+  h.app.store.db.prepare('UPDATE variants SET data=? WHERE id=?').run(JSON.stringify({ ...v, collectionIds: [] }), id(1));
+  await h.request('rules', { vendor: 'Example', mode: 'multiplier', multiplier: '1.4', vat: '24', addVat: true,
+    conditions: [{ from: '300', to: '999', amount: '25', collectionId: 'gid://shopify/Collection/1' }] });
+  assert.equal((await h.request('state')).data.products[0].result.fixed, 0);
+  const plan = (await h.request('preview', { ids: [id(1)] })).data;
+  assert.equal(plan.items[0].newPrice, 52100);
+  await h.request('apply', { id: plan.id }); await h.idle();
+  assert.equal(h.mutations[0].variants[0].price, '521.00');
 });

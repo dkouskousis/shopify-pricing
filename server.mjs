@@ -15,8 +15,8 @@ const same = (a, b) => {
   return aa.length === bb.length && timingSafeEqual(aa, bb);
 };
 function fail(message, status = 400) { const error = new Error(message); error.status = status; throw error; }
-function fingerprint(v) {
-  return JSON.stringify([v.price, v.cost, v.currency, v.vendor, v.status, v.taxable, v.compareAt, v.collectionIds]);
+function fingerprint(v, checkCollections) {
+  return JSON.stringify([v.price, v.cost, v.currency, v.vendor, v.status, v.taxable, v.compareAt, checkCollections ? v.collectionIds : null]);
 }
 function normalize(v) {
   return { id: v.id, productId: v.product.id, title: v.product.title, variant: v.title,
@@ -128,9 +128,8 @@ export function createApplication(config, dependencies = {}) {
           cost: fresh.inventoryItem.unitCost === null ? null : decimal(fresh.inventoryItem.unitCost.amount),
           currency: fresh.inventoryItem.unitCost?.currencyCode ?? null, taxable: fresh.taxable,
           vendor: fresh.product.vendor, status: fresh.product.status };
-        const rule = store.rules().find(r => r.vendor === cached.vendor);
-        if (rule.conditions.some(c => c.collectionId)) current.collectionIds = await productCollectionIds(api, item.productId);
-        if (fresh.product.id !== item.productId || fingerprint(current) !== item.fingerprint) fail('Άλλαξαν τιμή, κόστος, collections ή στοιχεία στο Shopify. Συγχρόνισε και κάνε νέα προεπισκόπηση.');
+        if (item.checkCollections) current.collectionIds = await productCollectionIds(api, item.productId);
+        if (fresh.product.id !== item.productId || fingerprint(current, item.checkCollections) !== item.fingerprint) fail('Άλλαξαν τιμή, κόστος, collections ή στοιχεία στο Shopify. Συγχρόνισε και κάνε νέα προεπισκόπηση.');
         sending = true;
         const payload = (await api(QUERIES.update, { productId: item.productId, variants: [{ id: item.id, price: money(item.newPrice) }] })).productVariantsBulkUpdate;
         if (payload.userErrors.length) { sending = false; fail(payload.userErrors.map(e => e.message).join('; ')); }
@@ -252,7 +251,7 @@ export function createApplication(config, dependencies = {}) {
             const { result } = resultFor(v); if (result.error) fail(`${v.title}: ${result.error}`);
             if (v.price === result.final) fail(`${v.title}: η τιμή δεν αλλάζει.`);
             return { id, productId: v.productId, title: `${v.title} / ${v.variant}`, oldPrice: v.price, newPrice: result.final,
-              profit: result.profit, margin: result.margin, fingerprint: fingerprint(v) };
+              profit: result.profit, margin: result.margin, checkCollections: result.requiresCollections, fingerprint: fingerprint(v, result.requiresCollections) };
           });
           const id = random(), expires = Date.now() + 15 * 60000;
           db.prepare('DELETE FROM previews WHERE expires<? OR consumed=1').run(Date.now());

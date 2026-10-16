@@ -49,11 +49,11 @@ function renderProducts() {
     const gainPercent = rule ? (rule.mode === 'margin' ? rule.targetMargin / (10000 - rule.targetMargin) * 100 : (rule.multiplier - 10000) / 100) : null;
     const vatPercent = rule ? (rule.addVat ? rule.vat / 100 : 0) : null;
     return `<tr>
-    <td><input type="checkbox" data-select="${escape(p.id)}" aria-label="Επιλογή ${escape(p.title)} ${escape(p.variant)}" ${selected.has(p.id) ? 'checked' : ''} ${eligible(p) ? '' : 'disabled'}></td>
+    <td><input type="checkbox" data-select="${escape(p.id)}" aria-label="Επιλογή ${escape(p.title)} ${escape(p.variant)}" title="${escape(p.result.error || (p.result.final === p.price ? 'Η τιμή είναι ήδη ενημερωμένη.' : 'Επιλογή για ενημέρωση τιμής.'))}" ${selected.has(p.id) ? 'checked' : ''} ${eligible(p) ? '' : 'disabled'}></td>
     <td><span class="product-title">${escape(p.title)}</span><small>${escape(p.variant)} · ${escape(p.vendor)}<br>SKU: ${escape(p.sku || '—')} · ${escape(p.status)}</small>${p.result.error ? `<small class="negative">${escape(p.result.error)}</small>` : ''}</td>
     <td class="number"><button class="quiet cost-button" data-cost="${escape(p.id)}" aria-label="Αλλαγή κόστους για ${escape(p.title)} ${escape(p.variant)}" ${state.job.running || state.job.costSaving ? 'disabled' : ''}>${p.cost === null ? 'Προσθήκη κόστους' : euros(p.cost)}</button></td>
     <td class="number">${euros(p.price)}${p.compareAt ? `<small>Compare-at: ${euros(p.compareAt)}</small>` : ''}</td>
-    <td class="number new-price">${p.result.error ? '—' : euros(p.result.final)}</td>
+    <td class="number new-price">${p.result.error ? '—' : euros(p.result.final)}${!p.result.error && p.result.final === p.price ? '<small>Ήδη ενημερωμένη</small>' : ''}</td>
     <td class="number ${gainPercent < 0 ? 'negative' : ''}">${gainPercent === null ? '—' : pct(gainPercent)}${rule?.mode === 'margin' ? `<small>Στόχος περιθωρίου ${pct(rule.targetMargin / 100)}</small>` : ''}</td>
     <td class="number">${rule ? (p.result.error ? '—' : euros(p.result.fixed)) : euros(0)}</td>
     <td class="number">${vatPercent === null ? '—' : pct(vatPercent)}</td>
