@@ -75,6 +75,16 @@ export function openStore(path, encryptionKey) {
       db.exec('DELETE FROM previews; PRAGMA user_version=7; COMMIT');
     } catch (error) { db.exec('ROLLBACK'); throw error; }
   }
+  if (db.prepare('PRAGMA user_version').get().user_version < 8) {
+    db.exec('BEGIN');
+    try {
+      for (const row of db.prepare('SELECT vendor,data FROM rules').all()) {
+        const { fixed, ...rule } = JSON.parse(row.data);
+        db.prepare('UPDATE rules SET data=? WHERE vendor=?').run(JSON.stringify(rule), row.vendor);
+      }
+      db.exec('DELETE FROM previews; PRAGMA user_version=8; COMMIT');
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
+  }
   // Interrupted writes may have reached Shopify. Never automatically repeat them.
   db.prepare("UPDATE audit SET status='uncertain',detail='Η εφαρμογή επανεκκινήθηκε κατά την ενημέρωση. Συγχρόνισε και έλεγξε την τιμή ή το κόστος.' WHERE status='pending'").run();
   const key = Buffer.from(encryptionKey, 'hex');

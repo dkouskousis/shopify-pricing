@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore } from '../store.mjs';
+const withoutFixed = ({ fixed, ...rule }) => rule;
 test('rounding upgrade invalidates old previews once and preserves supplier rules', () => {
   const dir = mkdtempSync(join(tmpdir(), 'pricing-rounding-')), path = join(dir, 'test.sqlite');
   try {
@@ -14,7 +15,7 @@ test('rounding upgrade invalidates old previews once and preserves supplier rule
     initial.db.prepare('INSERT INTO previews(id,data,expires) VALUES (?,?,?)').run('old', '{}', Date.now() + 10000);
     initial.db.exec('PRAGMA user_version=5'); initial.db.close();
     const upgraded = openStore(path, key);
-    assert.deepEqual(upgraded.rules(), [{ ...rule, conditions: [] }]);
+    assert.deepEqual(upgraded.rules(), [{ ...withoutFixed(rule), conditions: [] }]);
     assert.equal(upgraded.db.prepare('SELECT count(*) AS n FROM previews').get().n, 0);
     upgraded.db.prepare('INSERT INTO previews(id,data,expires) VALUES (?,?,?)').run('fresh', '{}', Date.now() + 10000);
     upgraded.db.close();
@@ -38,7 +39,7 @@ test('v1 rules migrate once, keep credentials/data and back up removed flat amou
     old.prepare('INSERT INTO meta VALUES (?,?)').run('lastSync', JSON.stringify('previous-sync'));
     old.close();
     const key = 'ab'.repeat(32), current = openStore(path, key);
-    assert.deepEqual(current.rules(), [{ vendor: 'Example', multiplier: 15457, vat: 2400, addVat: true, mode: 'multiplier', targetMargin: null, fixed: 0, conditions: [] }]);
+    assert.deepEqual(current.rules(), [{ vendor: 'Example', multiplier: 15457, vat: 2400, addVat: true, mode: 'multiplier', targetMargin: null, conditions: [] }]);
     assert.equal(current.get('lastSync'), 'previous-sync');
     assert.equal(current.get('legacyPricingV1').extras[0].amount, 2500);
     assert.equal(current.db.prepare('SELECT count(*) AS n FROM previews').get().n, 0);
@@ -58,7 +59,7 @@ test('v1.2 rules migrate to multiplier mode once without changing the chosen fac
     initial.db.prepare('INSERT INTO rules VALUES (?,?)').run('Existing', JSON.stringify({ vendor: 'Existing', multiplier: 15457, vat: 2400, addVat: false }));
     initial.db.exec('PRAGMA user_version=3'); initial.db.close();
     const migrated = openStore(path, key);
-    assert.deepEqual(migrated.rules()[0], { vendor: 'Existing', multiplier: 15457, vat: 2400, addVat: false, mode: 'multiplier', targetMargin: null, fixed: 0, conditions: [] });
+    assert.deepEqual(migrated.rules()[0], { vendor: 'Existing', multiplier: 15457, vat: 2400, addVat: false, mode: 'multiplier', targetMargin: null, conditions: [] });
     migrated.db.prepare('UPDATE rules SET data=? WHERE vendor=?').run(JSON.stringify({ vendor: 'Existing', mode: 'margin', multiplier: null, targetMargin: 4000, vat: 2400, addVat: true }), 'Existing');
     migrated.db.close();
     const reopened = openStore(path, key);
@@ -67,26 +68,26 @@ test('v1.2 rules migrate to multiplier mode once without changing the chosen fac
     reopened.db.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
-test('fixed amounts default to zero on upgrade and retain later saved values', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'pricing-fixed-')), path = join(dir, 'test.sqlite');
+test('v1.6 upgrade removes global amounts, preserves separate condition amounts and invalidates previews', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pricing-only-conditions-')), path = join(dir, 'test.sqlite');
   try {
     const key = 'ab'.repeat(32), initial = openStore(path, key);
-    initial.db.prepare('INSERT INTO rules VALUES (?,?)').run('Existing', JSON.stringify({ vendor: 'Existing', mode: 'margin', multiplier: null, targetMargin: 4000, vat: 2400, addVat: true }));
-    initial.db.exec('PRAGMA user_version=4'); initial.db.close();
+    const conditions = [{ from: 0, to: 5000, amount: 200, collectionId: '' }, { from: 30000, to: 99900, amount: 2500, collectionId: 'gid://shopify/Collection/1' }];
+    const rule = { vendor: 'Existing', mode: 'margin', multiplier: null, targetMargin: 4000, fixed: 1000, vat: 2400, addVat: true, conditions };
+    initial.db.prepare('INSERT INTO rules VALUES (?,?)').run(rule.vendor, JSON.stringify(rule));
+    initial.db.prepare('INSERT INTO previews(id,data,expires) VALUES (?,?,?)').run('old', '{}', Date.now() + 10000);
+    initial.db.exec('PRAGMA user_version=7'); initial.db.close();
     const migrated = openStore(path, key);
-    assert.equal(migrated.rules()[0].fixed, 0);
-    assert.equal(migrated.rules()[0].mode, 'margin');
-    assert.equal(migrated.rules()[0].targetMargin, 4000);
-    const rule = { ...migrated.rules()[0], fixed: 1000 };
-    migrated.db.prepare('UPDATE rules SET data=? WHERE vendor=?').run(JSON.stringify(rule), 'Existing');
+    assert.deepEqual(migrated.rules()[0], withoutFixed(rule));
+    assert.equal(migrated.db.prepare('SELECT count(*) AS n FROM previews').get().n, 0);
     migrated.db.close();
     const reopened = openStore(path, key);
-    assert.equal(reopened.rules()[0].fixed, 1000);
+    assert.deepEqual(reopened.rules()[0].conditions, conditions);
+    assert.equal(Object.hasOwn(reopened.rules()[0], 'fixed'), false);
     reopened.db.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
-
-test('condition upgrade preserves existing fixed amounts and requires collections sync only once', () => {
+test('condition upgrade preserves pricing mode and requires collections sync only once', () => {
   const dir = mkdtempSync(join(tmpdir(), 'pricing-conditions-')), path = join(dir, 'test.sqlite');
   try {
     const key = 'ab'.repeat(32), initial = openStore(path, key);
@@ -96,17 +97,17 @@ test('condition upgrade preserves existing fixed amounts and requires collection
     initial.db.prepare('INSERT INTO previews(id,data,expires) VALUES (?,?,?)').run('old', '{}', Date.now() + 10000);
     initial.db.exec('PRAGMA user_version=6'); initial.db.close();
     const upgraded = openStore(path, key);
-    assert.deepEqual(upgraded.rules(), [{ ...rule, conditions: [] }]);
+    assert.deepEqual(upgraded.rules(), [{ ...withoutFixed(rule), conditions: [] }]);
     assert.equal(upgraded.variant('variant').collectionIds, null);
     assert.deepEqual(upgraded.get('collections'), []);
     assert.equal(upgraded.db.prepare('SELECT count(*) AS n FROM previews').get().n, 0);
     const conditions = [{ from: 0, to: 5000, amount: 200, collectionId: '' }];
-    upgraded.db.prepare('UPDATE rules SET data=?').run(JSON.stringify({ ...rule, conditions }));
+    upgraded.db.prepare('UPDATE rules SET data=?').run(JSON.stringify({ ...withoutFixed(rule), conditions }));
     upgraded.put('collections', [{ id: 'collection', title: 'Sleep' }]);
     upgraded.db.close();
     const reopened = openStore(path, key);
     assert.deepEqual(reopened.rules()[0].conditions, conditions);
-    assert.equal(reopened.rules()[0].fixed, 1000);
+    assert.equal(Object.hasOwn(reopened.rules()[0], 'fixed'), false);
     assert.equal(reopened.get('collections')[0].title, 'Sleep');
     reopened.db.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }

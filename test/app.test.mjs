@@ -10,7 +10,7 @@ const id = n => `gid://shopify/ProductVariant/${n}`;
 function variant(n, price = '100.00', cost = '60.00') {
   return { id: id(n), title: 'Medium', price, compareAtPrice: null, taxable: true,
     inventoryItem: { id: 'gid://shopify/InventoryItem/' + n, sku: 'TEST-' + n, unitCost: cost === null ? null : { amount: cost, currencyCode: 'EUR' } },
-    product: { id: 'gid://shopify/Product/9', title: 'Test product ' + n, vendor: 'Example', conditions: [], fixed: '0', status: 'ACTIVE' } };
+    product: { id: 'gid://shopify/Product/9', title: 'Test product ' + n, vendor: 'Example', conditions: [], status: 'ACTIVE' } };
 }
 async function harness(t, variants = [variant(1)]) {
   let collectionIds = ['gid://shopify/Collection/1'];
@@ -67,7 +67,7 @@ async function harness(t, variants = [variant(1)]) {
   async function setup() {
     await login();
     assert.equal((await request('settings', { shop: 'example.myshopify.com', mode: 'access_token', clientId: '', clientSecret: '', accessToken: 'private-token' })).status, 200);
-    assert.equal((await request('rules', { vendor: 'Example', conditions: [], fixed: '0', mode: 'multiplier', multiplier: '1.55', vat: '24', addVat: true })).status, 200);
+    assert.equal((await request('rules', { vendor: 'Example', conditions: [], mode: 'multiplier', multiplier: '1.55', vat: '24', addVat: true })).status, 200);
     assert.equal((await request('sync', {})).status, 202); await idle();
   }
   return { app, request, setup, login, idle, setCollections: ids => { collectionIds = ids; }, setCollectionsError: () => { collectionsError = true; }, mutations, costMutations, setCostFailure: value => { costFailure = value; }, setPageError: () => { pageError = true; }, setMutationError: () => { mutationError = true; }, pages: () => pages };
@@ -119,7 +119,7 @@ test('changed Shopify cost/price rejects a stale update and logs failure', async
 test('rule edits invalidate saved previews', async t => {
   const h = await harness(t); await h.setup();
   const p = (await h.request('preview', { ids: [id(1)] })).data;
-  await h.request('rules', { vendor: 'Example', conditions: [], fixed: '0', mode: 'multiplier', multiplier: '1.60', vat: '24', addVat: true });
+  await h.request('rules', { vendor: 'Example', conditions: [], mode: 'multiplier', multiplier: '1.60', vat: '24', addVat: true });
   assert.equal((await h.request('apply', { id: p.id })).status, 409);
   assert.equal((await h.request('state')).data.products[0].result.final, 12000);
 });
@@ -144,7 +144,7 @@ test('expired previews are rejected and rule edits invalidate fresh previews', a
   h.app.store.db.prepare('UPDATE previews SET expires=0 WHERE id=?').run(p.id);
   assert.equal((await h.request('apply', { id: p.id })).status, 409);
   const p2 = (await h.request('preview', { ids: [id(1)] })).data;
-  await h.request('rules', { vendor: 'Example', conditions: [], fixed: '0', mode: 'multiplier', multiplier: '1.60', vat: '24', addVat: true });
+  await h.request('rules', { vendor: 'Example', conditions: [], mode: 'multiplier', multiplier: '1.60', vat: '24', addVat: true });
   assert.equal((await h.request('apply', { id: p2.id })).status, 409);
 });
 test('credential encryption round-trips and does not expose the plaintext', () => {
@@ -215,7 +215,7 @@ test('failed or uncertain cost writes do not become successful local costs', asy
 });
 test('margin rules persist, preview and apply the intended price, then recalculate after cost edits', async t => {
   const h = await harness(t); await h.setup();
-  const result = await h.request('rules', { vendor: 'Example', conditions: [], fixed: '0', mode: 'margin', targetMargin: '40', vat: '24', addVat: true });
+  const result = await h.request('rules', { vendor: 'Example', conditions: [], mode: 'margin', targetMargin: '40', vat: '24', addVat: true });
   assert.equal(result.status, 200);
   const state = (await h.request('state')).data;
   assert.equal(state.rules[0].mode, 'margin');
@@ -231,9 +231,9 @@ test('margin rules persist, preview and apply the intended price, then recalcula
 });
 test('fixed rule amount persists and flows through preview and Shopify price apply', async t => {
   const h = await harness(t); await h.setup();
-  const response = await h.request('rules', { vendor: 'Example', conditions: [], mode: 'multiplier', multiplier: '1.4', fixed: '10', vat: '24', addVat: true });
+  const response = await h.request('rules', { vendor: 'Example', conditions: [{ from: '0', to: '1000', amount: '10', collectionId: '' }], mode: 'multiplier', multiplier: '1.4', vat: '24', addVat: true });
   assert.equal(response.status, 200);
-  assert.equal((await h.request('state')).data.rules[0].fixed, 1000);
+  assert.equal((await h.request('state')).data.rules[0].conditions[0].amount, 1000);
   const plan = (await h.request('preview', { ids: [id(1)] })).data;
   assert.equal(plan.items[0].newPrice, 11700);
   await h.request('apply', { id: plan.id }); await h.idle();
@@ -241,7 +241,7 @@ test('fixed rule amount persists and flows through preview and Shopify price app
 });
 test('small product price uses half-euro rounding consistently through Shopify apply', async t => {
   const h = await harness(t, [variant(1, '8.00', '8.12')]); await h.setup();
-  await h.request('rules', { vendor: 'Example', conditions: [], mode: 'multiplier', multiplier: '1', fixed: '0', vat: '0', addVat: false });
+  await h.request('rules', { vendor: 'Example', conditions: [], mode: 'multiplier', multiplier: '1', vat: '0', addVat: false });
   const state = (await h.request('state')).data;
   assert.deepEqual(state.products[0].result, { final: 850, net: 850, profit: 38, margin: 4.47, fixed: 0, referencePrice: 850 });
   const plan = (await h.request('preview', { ids: [id(1)] })).data;
@@ -256,21 +256,21 @@ test('conditional totals persist and match state, preview and Shopify writes', a
     { from: '300', to: '999', amount: '25', collectionId: 'gid://shopify/Collection/1' },
     { from: '300', to: '999', amount: '2', collectionId: '' },
   ];
-  assert.equal((await h.request('rules', { vendor: 'Example', mode: 'multiplier', multiplier: '1', fixed: '1', vat: '24', addVat: true, conditions })).status, 200);
+  assert.equal((await h.request('rules', { vendor: 'Example', mode: 'multiplier', multiplier: '1', vat: '24', addVat: true, conditions })).status, 200);
   const state = (await h.request('state')).data;
   assert.equal(state.collections[0].title, 'Sleep');
   assert.deepEqual(state.products[0].collectionIds, ['gid://shopify/Collection/1']);
   assert.equal(state.rules[0].conditions.length, 2);
-  assert.equal(state.products[0].result.fixed, 2800);
-  assert.equal(state.products[0].result.final, 40700);
+  assert.equal(state.products[0].result.fixed, 2700);
+  assert.equal(state.products[0].result.final, 40600);
   const plan = (await h.request('preview', { ids: [id(1)] })).data;
-  assert.equal(plan.items[0].newPrice, 40700);
+  assert.equal(plan.items[0].newPrice, 40600);
   await h.request('apply', { id: plan.id }); await h.idle();
-  assert.equal(h.mutations[0].variants[0].price, '407.00');
+  assert.equal(h.mutations[0].variants[0].price, '406.00');
 });
 test('collection membership changes reject a stale price update before writing', async t => {
   const h = await harness(t); await h.setup();
-  await h.request('rules', { vendor: 'Example', mode: 'multiplier', multiplier: '1', fixed: '0', vat: '24', addVat: true,
+  await h.request('rules', { vendor: 'Example', mode: 'multiplier', multiplier: '1', vat: '24', addVat: true,
     conditions: [{ from: '0', to: '999', amount: '25', collectionId: 'gid://shopify/Collection/1' }] });
   const plan = (await h.request('preview', { ids: [id(1)] })).data;
   h.setCollections([]);
@@ -281,7 +281,7 @@ test('collection membership changes reject a stale price update before writing',
 });
 test('unknown collection IDs cannot be silently saved', async t => {
   const h = await harness(t); await h.setup();
-  const result = await h.request('rules', { vendor: 'Example', mode: 'multiplier', multiplier: '1', fixed: '0', vat: '24', addVat: true,
+  const result = await h.request('rules', { vendor: 'Example', mode: 'multiplier', multiplier: '1', vat: '24', addVat: true,
     conditions: [{ from: '0', to: '999', amount: '25', collectionId: 'gid://shopify/Collection/999' }] });
   assert.equal(result.status, 400);
   assert.equal((await h.request('state')).data.rules[0].conditions.length, 0);

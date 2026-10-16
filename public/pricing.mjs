@@ -33,7 +33,6 @@ export function validateRule(input) {
     conditions,
     mode: input.mode,
     targetMargin,
-    fixed: input.fixed === '' ? 0 : decimal(input.fixed, 'Σταθερό ποσό €', 100000),
     vendor: input.vendor.trim(),
     multiplier: input.mode === 'multiplier' ? priceMultiplier(input.multiplier) : null,
     vat: decimal(input.vat, 'Συντελεστής ΦΠΑ', 100),
@@ -54,12 +53,12 @@ export function calculate(cost, rule, taxable = true, collectionIds = null) {
   const numerator = BigInt(cost) * BigInt(rule.mode === 'margin' ? 10000 : rule.multiplier);
   const denominator = BigInt(rule.mode === 'margin' ? 10000 - rule.targetMargin : 10000);
   const vatFactor = BigInt(rule.addVat ? 10000 + rule.vat : 10000);
-  const baseNumerator = (numerator + BigInt(rule.fixed) * denominator) * vatFactor;
+  const baseNumerator = numerator * vatFactor;
   const totalDenominator = denominator * 10000n;
   // Every condition sees the same rounded base sale price. Additions cannot
   // trigger another condition, regardless of row order. Bounds are inclusive.
   const referencePrice = roundedPrice(baseNumerator, totalDenominator);
-  const fixed = rule.fixed + rule.conditions.filter(c => referencePrice >= c.from && referencePrice <= c.to
+  const fixed = rule.conditions.filter(c => referencePrice >= c.from && referencePrice <= c.to
     && (!c.collectionId || collectionIds.includes(c.collectionId))).reduce((sum, c) => sum + c.amount, 0);
   const final = roundedPrice((numerator + BigInt(fixed) * denominator) * vatFactor, totalDenominator);
   const net = Number(roundDivide(BigInt(final) * 10000n, BigInt(taxable ? 10000 + rule.vat : 10000)));

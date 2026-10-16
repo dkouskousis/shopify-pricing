@@ -69,7 +69,7 @@ function renderProducts() {
 }
 function renderRules() {
   $('#vendors-list').innerHTML = state.vendors.map(v => `<option value="${escape(v)}"></option>`).join('');
-  $('#rule-list').innerHTML = state.rules.length ? state.rules.map(r => `<div class="rule-card"><div><strong>${escape(r.vendor)}</strong><p><span class="rule-type">${r.mode === 'margin' ? 'Περιθώριο ' + pct(r.targetMargin / 100) : 'Συντελεστής ×' + escape(new Intl.NumberFormat('el-GR', { maximumFractionDigits: 4 }).format(r.multiplier / 10000))}</span> · +${euros(r.fixed)} πριν τον ΦΠΑ · ${r.addVat ? 'με προσθήκη ΦΠΑ ' + pct(r.vat / 100) : 'χωρίς προσθήκη ΦΠΑ'}</p></div><div class="actions"><button class="quiet" data-edit-rule="${escape(r.vendor)}">Επεξεργασία</button><button class="quiet" data-delete-rule="${escape(r.vendor)}" aria-label="Διαγραφή κανόνα ${escape(r.vendor)}">×</button></div></div>`).join('') : '<p class="muted">Δεν έχουν οριστεί κανόνες.</p>';
+  $('#rule-list').innerHTML = state.rules.length ? state.rules.map(r => `<div class="rule-card"><div><strong>${escape(r.vendor)}</strong><p><span class="rule-type">${r.mode === 'margin' ? 'Περιθώριο ' + pct(r.targetMargin / 100) : 'Συντελεστής ×' + escape(new Intl.NumberFormat('el-GR', { maximumFractionDigits: 4 }).format(r.multiplier / 10000))}</span> · ${r.addVat ? 'με προσθήκη ΦΠΑ ' + pct(r.vat / 100) : 'χωρίς προσθήκη ΦΠΑ'}</p></div><div class="actions"><button class="quiet" data-edit-rule="${escape(r.vendor)}">Επεξεργασία</button><button class="quiet" data-delete-rule="${escape(r.vendor)}" aria-label="Διαγραφή κανόνα ${escape(r.vendor)}">×</button></div></div>`).join('') : '<p class="muted">Δεν έχουν οριστεί κανόνες.</p>';
   for (const card of document.querySelectorAll('.rule-card')) {
     const rule = state.rules.find(r => r.vendor === card.querySelector('[data-edit-rule]').dataset.editRule);
     if (rule.conditions.length) card.querySelector('div').insertAdjacentHTML('beforeend', `<ul class="condition-summary">${rule.conditions.map(c => `<li>${euros(c.from)}–${euros(c.to)} · ${escape(c.collectionId ? state.collections.find(x => x.id === c.collectionId)?.title ?? 'Collection δεν βρέθηκε' : 'Όλα τα collections')} · +${euros(c.amount)} πριν τον ΦΠΑ</li>`).join('')}</ul>`);
@@ -204,12 +204,12 @@ function ruleExample() {
   ruleForm.elements.multiplier.disabled = marginMode; ruleForm.elements.multiplier.required = !marginMode;
   ruleForm.elements.targetMargin.disabled = !marginMode; ruleForm.elements.targetMargin.required = marginMode;
   $('#rule-formula').textContent = marginMode
-    ? '(Αγορά ÷ (1 − μικτό περιθώριο / 100) + σταθερό ποσό) × προαιρετικός ΦΠΑ'
-    : '(Αγορά × συντελεστής + σταθερό ποσό) × προαιρετικός ΦΠΑ';
+    ? '(Αγορά ÷ (1 − μικτό περιθώριο / 100) + σύνολο ποσών όρων) × προαιρετικός ΦΠΑ'
+    : '(Αγορά × συντελεστής + σύνολο ποσών όρων) × προαιρετικός ΦΠΑ';
   try {
     const rule = validateRule({ vendor: 'Παράδειγμα', mode: ruleForm.elements.mode.value,
       multiplier: ruleForm.elements.multiplier.value, targetMargin: ruleForm.elements.targetMargin.value,
-      conditions: conditionInputs(), fixed: ruleForm.elements.fixed.value, addVat: ruleForm.elements.addVat.checked, vat: ruleForm.elements.vat.value });
+      conditions: conditionInputs(), addVat: ruleForm.elements.addVat.checked, vat: ruleForm.elements.vat.value });
     const cost = decimal($('#example-cost').value, 'Δοκιμαστική αγορά');
     const result = calculate(cost, rule, true, [...$('#example-collections').selectedOptions].map(o => o.value));
     if (result.error) throw new Error(result.error);
@@ -249,7 +249,6 @@ $('#rules').addEventListener('click', event => {
     clearConditions();
     for (const c of r.conditions) addCondition({ ...c, from: (c.from / 100).toFixed(2), to: (c.to / 100).toFixed(2), amount: (c.amount / 100).toFixed(2) });
     ruleForm.elements.mode.value = r.mode;
-    ruleForm.elements.fixed.value = (r.fixed / 100).toFixed(2);
     ruleForm.elements.multiplier.value = r.multiplier === null ? '' : String(r.multiplier / 10000);
     ruleForm.elements.targetMargin.value = r.targetMargin === null ? '40' : String(r.targetMargin / 100);
     ruleForm.elements.vat.value = (r.vat / 100).toFixed(2);
