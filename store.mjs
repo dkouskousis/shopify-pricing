@@ -33,8 +33,15 @@ export function openStore(path, encryptionKey) {
       db.exec('DELETE FROM previews; PRAGMA user_version=2; COMMIT');
     } catch (error) { db.exec('ROLLBACK'); throw error; }
   }
+  if (db.prepare('PRAGMA user_version').get().user_version < 3) {
+    db.exec(`BEGIN;
+      ALTER TABLE audit ADD COLUMN kind TEXT NOT NULL DEFAULT 'price';
+      ALTER TABLE audit ADD COLUMN old_missing INTEGER NOT NULL DEFAULT 0;
+      PRAGMA user_version=3;
+      COMMIT;`);
+  }
   // Interrupted writes may have reached Shopify. Never automatically repeat them.
-  db.prepare("UPDATE audit SET status='uncertain',detail='Η εφαρμογή επανεκκινήθηκε κατά την ενημέρωση. Συγχρόνισε και έλεγξε την τιμή.' WHERE status='pending'").run();
+  db.prepare("UPDATE audit SET status='uncertain',detail='Η εφαρμογή επανεκκινήθηκε κατά την ενημέρωση. Συγχρόνισε και έλεγξε την τιμή ή το κόστος.' WHERE status='pending'").run();
   const key = Buffer.from(encryptionKey, 'hex');
   function encrypt(value) {
     const iv = randomBytes(12), cipher = createCipheriv('aes-256-gcm', key, iv);

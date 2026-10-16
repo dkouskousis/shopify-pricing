@@ -9,11 +9,11 @@ const config = { appUrl: 'http://localhost', password: 'a-long-test-password-202
 const id = n => `gid://shopify/ProductVariant/${n}`;
 function variant(n, price = '100.00', cost = '60.00') {
   return { id: id(n), title: 'Medium', price, compareAtPrice: null, taxable: true,
-    inventoryItem: { sku: 'TEST-' + n, unitCost: cost === null ? null : { amount: cost, currencyCode: 'EUR' } },
+    inventoryItem: { id: 'gid://shopify/InventoryItem/' + n, sku: 'TEST-' + n, unitCost: cost === null ? null : { amount: cost, currencyCode: 'EUR' } },
     product: { id: 'gid://shopify/Product/9', title: 'Test product ' + n, vendor: 'Example', status: 'ACTIVE' } };
 }
 async function harness(t, variants = [variant(1)]) {
-  let mutations = [], pages = 0, pageError = false, mutationError = false;
+  let mutations = [], costMutations = [], pages = 0, pageError = false, mutationError = false, costFailure = null;
   const api = async (query, variables) => {
     if (query.includes('ShopInfo')) return { shop: { name: 'Test shop', myshopifyDomain: 'example.myshopify.com', currencyCode: 'EUR' } };
     if (query.includes('PricingVariants')) {
@@ -28,6 +28,14 @@ async function harness(t, variants = [variant(1)]) {
       if (mutationError) throw new Error('Network timeout during write');
       const update = variables.variants[0], v = variants.find(v => v.id === update.id); v.price = update.price;
       return { productVariantsBulkUpdate: { productVariants: [{ id: v.id, price: v.price }], userErrors: [] } };
+    }
+    if (query.includes('UpdatePricingCost')) {
+      costMutations.push(variables);
+      if (costFailure === 'network') throw new Error('Network timeout during cost write');
+      if (costFailure === 'denied') return { inventoryItemUpdate: { inventoryItem: null, userErrors: [{ message: 'Missing write_inventory permission' }] } };
+      const v = variants.find(v => v.inventoryItem.id === variables.id);
+      v.inventoryItem.unitCost = { amount: variables.input.cost, currencyCode: 'EUR' };
+      return { inventoryItemUpdate: { inventoryItem: v.inventoryItem, userErrors: [] } };
     }
     throw new Error('Unexpected operation');
   };
@@ -57,7 +65,7 @@ async function harness(t, variants = [variant(1)]) {
     assert.equal((await request('rules', { vendor: 'Example', multiplier: '1.55', vat: '24', addVat: true })).status, 200);
     assert.equal((await request('sync', {})).status, 202); await idle();
   }
-  return { app, request, setup, login, idle, mutations, setPageError: () => { pageError = true; }, setMutationError: () => { mutationError = true; }, pages: () => pages };
+  return { app, request, setup, login, idle, mutations, costMutations, setCostFailure: value => { costFailure = value; }, setPageError: () => { pageError = true; }, setMutationError: () => { mutationError = true; }, pages: () => pages };
 }
 test('authentication, origin and CSRF guard every write; secrets are masked', async t => {
   const h = await harness(t);
@@ -154,4 +162,49 @@ test('invalid settings cannot send credentials to arbitrary hosts', () => {
   const data = { mode: 'access_token', clientId: '', clientSecret: '', accessToken: 'token' };
   for (const shop of ['localhost', 'example.com', 'x.myshopify.com.evil.com', 'https://example.myshopify.com', 'example.myshopify.com/path']) assert.throws(() => validateSettings({ ...data, shop }));
   assert.equal(validateSettings({ ...data, shop: 'example.myshopify.com' }).shop, 'example.myshopify.com');
+});
+
+test('editing cost saves only the selected inventory item, verifies readback and recalculates', async t => {
+  const variants = [variant(1), variant(2)];
+  const h = await harness(t, variants); await h.setup();
+  const preview = (await h.request('preview', { ids: [id(1)] })).data;
+  assert.equal((await h.request('cost', { id: id(1), cost: '65,00', expectedCost: 6000 })).status, 200);
+  assert.deepEqual(h.costMutations, [{ id: 'gid://shopify/InventoryItem/1', input: { cost: '65.00' } }]);
+  assert.equal(h.mutations.length, 0);
+  assert.equal(variants[0].price, '100.00');
+  assert.equal(variants[1].inventoryItem.unitCost.amount, '60.00');
+  const state = (await h.request('state')).data;
+  assert.equal(state.products.find(v => v.id === id(1)).cost, 6500);
+  assert.equal(state.products.find(v => v.id === id(1)).result.final, 12493);
+  assert.equal(state.audit[0].kind, 'cost');
+  assert.equal(state.audit[0].status, 'success');
+  assert.equal((await h.request('apply', { id: preview.id })).status, 409);
+});
+test('missing purchase cost can be filled from the product list', async t => {
+  const h = await harness(t, [variant(1, '100', null)]); await h.setup();
+  assert.equal((await h.request('cost', { id: id(1), cost: '60', expectedCost: null })).status, 200);
+  const s = (await h.request('state')).data;
+  assert.equal(s.products[0].result.final, 11532);
+  assert.equal(s.audit[0].old_missing, 1);
+});
+test('cost writes reject stale costs, bad input and absent CSRF', async t => {
+  const variants = [variant(1)], h = await harness(t, variants); await h.setup();
+  assert.equal((await h.request('cost', { id: id(1), cost: '65', expectedCost: 6000 }, { 'X-CSRF-Token': '' })).status, 403);
+  assert.equal((await h.request('cost', { id: id(1), cost: '-1', expectedCost: 6000 })).status, 400);
+  assert.equal((await h.request('cost', { id: id(1), cost: '65', expectedCost: 5000 })).status, 409);
+  variants[0].inventoryItem.unitCost.amount = '62';
+  assert.equal((await h.request('cost', { id: id(1), cost: '65', expectedCost: 6000 })).status, 409);
+  assert.equal(h.costMutations.length, 0);
+  assert.equal((await h.request('state')).data.products[0].cost, 6000);
+});
+test('failed or uncertain cost writes do not become successful local costs', async t => {
+  const h = await harness(t); await h.setup(); h.setCostFailure('denied');
+  assert.equal((await h.request('cost', { id: id(1), cost: '65', expectedCost: 6000 })).status, 400);
+  let s = (await h.request('state')).data;
+  assert.equal(s.products[0].cost, 6000); assert.equal(s.audit[0].status, 'failed');
+  h.setCostFailure('network');
+  const response = await h.request('cost', { id: id(1), cost: '65', expectedCost: 6000 });
+  assert.equal(response.status, 400); assert.match(response.data.error, /αβέβαιο/);
+  s = (await h.request('state')).data;
+  assert.equal(s.products[0].cost, 6000); assert.equal(s.audit[0].status, 'uncertain');
 });

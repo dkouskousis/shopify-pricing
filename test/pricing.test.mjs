@@ -24,3 +24,10 @@ test('missing and invalid input never silently becomes zero', () => {
   for (const input of ['', '-1', 'NaN', 'Infinity', '1.234', '1e4']) assert.throws(() => decimal(input));
   for (const input of ['', '0', '-1', '101', '1.23456', 'Infinity']) assert.throws(() => priceMultiplier(input));
 });
+
+test('gross profit and gross margin are based on the proposed net selling price', () => {
+  const result = calculate(12395, validateRule({ vendor: 'Example', multiplier: '1.4', vat: '24', addVat: true }));
+  assert.equal(result.final, 21518);
+  assert.equal(result.profit, 4958);
+  assert.equal(result.margin, 28.57);
+});

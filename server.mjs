@@ -48,7 +48,7 @@ export function createApplication(config, dependencies = {}) {
   const authMarker = createHmac('sha256', Buffer.from(config.encryptionKey, 'hex')).update(config.password).digest('hex');
   if (store.get('authMarker') !== authMarker) { db.exec('DELETE FROM sessions'); store.put('authMarker', authMarker); }
   const makeShopify = dependencies.makeShopify ?? createShopify;
-  let client = null, shuttingDown = false, job = { running: false, type: null, completed: 0, total: 0, message: '', error: null };
+  let client = null, shuttingDown = false, costSaving = false, job = { running: false, type: null, completed: 0, total: 0, message: '', error: null };
   const attempts = new Map();
   const cookie = (value, maxAge) => `pricing_session=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${appUrl.protocol === 'https:' ? '; Secure' : ''}`;
   function graphql() {
@@ -169,14 +169,14 @@ export function createApplication(config, dependencies = {}) {
         if (req.method === 'POST' && url.pathname === '/api/logout') { db.prepare('DELETE FROM sessions WHERE id=?').run(session.id); return json({ ok: true }, 200, { 'Set-Cookie': cookie('', 0) }); }
         if (req.method === 'GET' && url.pathname === '/api/state') {
           const s = store.settings();
-          return json({ csrf: session.csrf, job, lastSync: store.get('lastSync'), shopInfo: store.get('shopInfo'),
+          return json({ csrf: session.csrf, job: { ...job, costSaving }, lastSync: store.get('lastSync'), shopInfo: store.get('shopInfo'),
             settings: s ? { shop: s.shop, mode: s.mode, clientId: s.clientId, hasClientSecret: Boolean(s.clientSecret), hasAccessToken: Boolean(s.accessToken) } : null,
             rules: store.rules(), vendors: [...new Set(store.variants().map(v => v.vendor))].sort(),
             products: store.variants().map(resultFor), audit: db.prepare('SELECT * FROM audit ORDER BY id DESC LIMIT 200').all() });
         }
         if (req.method !== 'POST') fail('Δεν βρέθηκε.', 404);
-        if (job.running || shuttingDown) fail('Περίμενε να ολοκληρωθεί η τρέχουσα εργασία.', 409);
         const input = await body(req);
+        if (job.running || costSaving || shuttingDown) fail('Περίμενε να ολοκληρωθεί η τρέχουσα εργασία.', 409);
         if (url.pathname === '/api/settings') {
           store.saveSettings(validateSettings(input, store.settings() ?? {})); client = null; invalidate(); return json({ ok: true });
         }
@@ -192,6 +192,42 @@ export function createApplication(config, dependencies = {}) {
           db.prepare('INSERT OR REPLACE INTO rules VALUES (?,?)').run(rule.vendor, JSON.stringify(rule)); invalidate(); return json({ ok: true });
         }
         if (url.pathname === '/api/rules/delete') { db.prepare('DELETE FROM rules WHERE vendor=?').run(String(input.vendor)); invalidate(); return json({ ok: true }); }
+        if (url.pathname === '/api/cost') {
+          const cached = store.variant(input.id);
+          if (!cached) fail('Δεν βρέθηκε η παραλλαγή.');
+          const amount = decimal(input.cost, 'Τιμή αγοράς');
+          if (input.expectedCost !== cached.cost) fail('Το κόστος έχει αλλάξει. Ανανέωσε τη λίστα και δοκίμασε ξανά.', 409);
+          if (amount === cached.cost) return json({ ok: true, unchanged: true });
+          const audit = db.prepare('INSERT INTO audit(created,variant_id,title,old_price,new_price,status,detail,kind,old_missing) VALUES (?,?,?,?,?,?,?,?,?)')
+            .run(new Date().toISOString(), cached.id, `${cached.title} / ${cached.variant}`, cached.cost ?? 0, amount, 'pending', '', 'cost', cached.cost === null ? 1 : 0);
+          costSaving = true;
+          let sending = false;
+          try {
+            const api = graphql();
+            const fresh = (await api(QUERIES.check, { id: cached.id })).productVariant;
+            if (!fresh || fresh.product.id !== cached.productId) fail('Η παραλλαγή δεν υπάρχει πλέον ή άλλαξε προϊόν.');
+            const oldCost = fresh.inventoryItem.unitCost === null ? null : decimal(fresh.inventoryItem.unitCost.amount);
+            if (oldCost !== cached.cost) fail('Το κόστος άλλαξε στο Shopify. Κάνε συγχρονισμό πριν το αντικαταστήσεις.', 409);
+            if (fresh.inventoryItem.unitCost && fresh.inventoryItem.unitCost.currencyCode !== 'EUR') fail('Το κόστος δεν είναι σε EUR.');
+            sending = true;
+            const payload = (await api(QUERIES.updateCost, { id: fresh.inventoryItem.id, input: { cost: money(amount) } })).inventoryItemUpdate;
+            if (payload.userErrors.length) { sending = false; fail(payload.userErrors.map(e => e.message).join('; ')); }
+            if (payload.inventoryItem?.id !== fresh.inventoryItem.id || !payload.inventoryItem.unitCost
+              || payload.inventoryItem.unitCost.currencyCode !== 'EUR' || decimal(payload.inventoryItem.unitCost.amount) !== amount) fail('Δεν επιβεβαιώθηκε η ενημέρωση κόστους. Συγχρόνισε και έλεγξε το Shopify πριν ξαναδοκιμάσεις.');
+            const readback = (await api(QUERIES.check, { id: cached.id })).productVariant;
+            if (!readback || readback.inventoryItem.id !== fresh.inventoryItem.id || !readback.inventoryItem.unitCost
+              || readback.inventoryItem.unitCost.currencyCode !== 'EUR' || decimal(readback.inventoryItem.unitCost.amount) !== amount) fail('Δεν επιβεβαιώθηκε η νέα τιμή αγοράς με επανέλεγχο. Συγχρόνισε και έλεγξε το Shopify.');
+            db.prepare('UPDATE variants SET data=? WHERE id=?').run(JSON.stringify({ ...cached, cost: amount, currency: 'EUR' }), cached.id);
+            invalidate();
+            db.prepare("UPDATE audit SET status='success',detail='' WHERE id=?").run(audit.lastInsertRowid);
+            return json({ ok: true, cost: amount });
+          } catch (error) {
+            invalidate();
+            db.prepare('UPDATE audit SET status=?,detail=? WHERE id=?').run(sending ? 'uncertain' : 'failed', safeError(error), audit.lastInsertRowid);
+            if (sending) fail(`Το αποτέλεσμα της ενημέρωσης κόστους είναι αβέβαιο. Κάνε συγχρονισμό και έλεγξε το Shopify πριν ξαναδοκιμάσεις. ${safeError(error)}`);
+            throw error;
+          } finally { costSaving = false; }
+        }
         if (url.pathname === '/api/sync') { startJob('sync', sync); return json({ ok: true }, 202); }
         if (url.pathname === '/api/preview') {
           if (!Array.isArray(input.ids) || !input.ids.length || input.ids.length > 100 || new Set(input.ids).size !== input.ids.length) fail('Επίλεξε 1–100 διαφορετικές παραλλαγές.');
@@ -230,7 +266,7 @@ export function createApplication(config, dependencies = {}) {
     async shutdown() {
       shuttingDown = true;
       server.close();
-      while (job.running) await new Promise(resolve => setTimeout(resolve, 100));
+      while (job.running || costSaving) await new Promise(resolve => setTimeout(resolve, 100));
       db.close();
     },
   };

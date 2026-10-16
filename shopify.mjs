@@ -13,13 +13,19 @@ export const QUERIES = {
   }`,
   check: `query CurrentPricingVariant($id: ID!) {
     productVariant(id: $id) { id price compareAtPrice taxable
-      inventoryItem { unitCost { amount currencyCode } }
+      inventoryItem { id unitCost { amount currencyCode } }
       product { id vendor status }
     }
   }`,
   update: `mutation UpdatePricingVariant($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
     productVariantsBulkUpdate(productId: $productId, variants: $variants) {
       productVariants { id price }
+      userErrors { field message }
+    }
+  }`,
+  updateCost: `mutation UpdatePricingCost($id: ID!, $input: InventoryItemInput!) {
+    inventoryItemUpdate(id: $id, input: $input) {
+      inventoryItem { id unitCost { amount currencyCode } }
       userErrors { field message }
     }
   }`,
