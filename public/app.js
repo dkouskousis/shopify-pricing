@@ -48,12 +48,14 @@ function renderProducts() {
     const rule = state.rules.find(r => r.vendor === p.vendor);
     const gainPercent = rule ? (rule.mode === 'margin' ? rule.targetMargin / (10000 - rule.targetMargin) * 100 : (rule.multiplier - 10000) / 100) : null;
     const vatPercent = rule ? (rule.addVat ? rule.vat / 100 : 0) : null;
+    const direction = !p.result.error && p.result.final !== p.price ? (p.result.final > p.price ? 'up' : 'down') : '';
+    const priceChange = direction ? `${direction === 'up' ? 'Αύξηση' : 'Μείωση'} κατά ${euros(Math.abs(p.result.final - p.price))}` : '';
     return `<tr>
     <td><input type="checkbox" data-select="${escape(p.id)}" aria-label="Επιλογή ${escape(p.title)} ${escape(p.variant)}" title="${escape(p.result.error || (p.result.final === p.price ? 'Η τιμή είναι ήδη ενημερωμένη.' : 'Επιλογή για ενημέρωση τιμής.'))}" ${selected.has(p.id) ? 'checked' : ''} ${eligible(p) ? '' : 'disabled'}></td>
-    <td><span class="product-title">${escape(p.title)}</span><small>${escape(p.variant)} · ${escape(p.vendor)}<br>SKU: ${escape(p.sku || '—')} · ${escape(p.status)}</small>${p.result.error ? `<small class="negative">${escape(p.result.error)}</small>` : ''}</td>
+    <td><div class="product-cell">${p.image ? `<button class="product-thumbnail" data-image="${escape(p.id)}" aria-label="Μεγέθυνση φωτογραφίας: ${escape(p.title)}"><img src="${escape(p.image.thumbnail)}" alt="${escape(p.image.altText || p.title)}" width="32" height="32" loading="lazy" decoding="async" referrerpolicy="no-referrer"></button>` : '<span class="product-thumbnail-empty" title="Χωρίς φωτογραφία" aria-label="Χωρίς φωτογραφία">—</span>'}<div><span class="product-title">${escape(p.title)}</span><small>${escape(p.variant)} · ${escape(p.vendor)}<br>SKU: ${escape(p.sku || '—')} · ${escape(p.status)}</small>${p.result.error ? `<small class="negative">${escape(p.result.error)}</small>` : ''}</div></div></td>
     <td class="number"><button class="quiet cost-button" data-cost="${escape(p.id)}" aria-label="Αλλαγή κόστους για ${escape(p.title)} ${escape(p.variant)}" ${state.job.running || state.job.costSaving ? 'disabled' : ''}>${p.cost === null ? 'Προσθήκη κόστους' : euros(p.cost)}</button></td>
     <td class="number">${euros(p.price)}${p.compareAt ? `<small>Compare-at: ${euros(p.compareAt)}</small>` : ''}</td>
-    <td class="number new-price">${p.result.error ? '—' : euros(p.result.final)}${!p.result.error && p.result.final === p.price ? '<small>Ήδη ενημερωμένη</small>' : ''}</td>
+    <td class="number new-price ${direction ? 'price-' + direction : ''}" title="${escape(priceChange)}">${direction ? `<span aria-hidden="true">${direction === 'up' ? '↑' : '↓'}</span> ` : ''}${p.result.error ? '—' : euros(p.result.final)}${!p.result.error && p.result.final === p.price ? '<small>Ήδη ενημερωμένη</small>' : ''}</td>
     <td class="number ${gainPercent < 0 ? 'negative' : ''}">${gainPercent === null ? '—' : pct(gainPercent)}${rule?.mode === 'margin' ? `<small>Στόχος περιθωρίου ${pct(rule.targetMargin / 100)}</small>` : ''}</td>
     <td class="number">${rule ? (p.result.error ? '—' : euros(p.result.fixed)) : euros(0)}</td>
     <td class="number">${vatPercent === null ? '—' : pct(vatPercent)}</td>
@@ -126,6 +128,14 @@ $('#product-rows').addEventListener('change', event => {
   event.target.checked ? selected.add(id) : selected.delete(id); renderProducts();
 });
 $('#product-rows').addEventListener('click', event => {
+  const imageButton = event.target.closest('[data-image]');
+  if (imageButton) {
+    const product = state.products.find(p => p.id === imageButton.dataset.image);
+    $('#image-title').textContent = product.title;
+    $('#product-image').alt = product.image.altText || product.title;
+    $('#product-image').src = product.image.url;
+    $('#image-dialog').showModal(); return;
+  }
   const button = event.target.closest('[data-cost]'); if (!button) return;
   const product = state.products.find(p => p.id === button.dataset.cost);
   costEdit = { id: product.id, expectedCost: product.cost };
@@ -133,6 +143,9 @@ $('#product-rows').addEventListener('click', event => {
   $('#cost-form').elements.cost.value = product.cost === null ? '' : (product.cost / 100).toFixed(2);
   $('#cost-dialog').showModal(); $('#cost-form').elements.cost.focus();
 });
+$('#close-image').addEventListener('click', () => $('#image-dialog').close());
+$('#image-dialog').addEventListener('click', event => { if (event.target === $('#image-dialog')) $('#image-dialog').close(); });
+$('#image-dialog').addEventListener('close', () => { $('#product-image').removeAttribute('src'); });
 $('#close-cost').addEventListener('click', () => { if (!costPending) $('#cost-dialog').close(); });
 $('#cost-dialog').addEventListener('cancel', event => { if (costPending) event.preventDefault(); });
 $('#cost-form').addEventListener('submit', event => {

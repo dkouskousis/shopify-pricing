@@ -15,7 +15,9 @@ export const QUERIES = {
     productVariants(first: 100, after: $after) {
       nodes { id title price compareAtPrice taxable
         inventoryItem { sku unitCost { amount currencyCode } }
-        product { id title vendor status }
+        product { id title vendor status
+          featuredMedia { preview { image { altText thumbnail: url(transform: {maxWidth: 80, maxHeight: 80}) url(transform: {maxWidth: 1600, maxHeight: 1600}) } } }
+        }
       }
       pageInfo { hasNextPage endCursor }
     }

@@ -336,3 +336,16 @@ test('a known non-member product within a charge range still receives the base p
   await h.request('apply', { id: plan.id }); await h.idle();
   assert.equal(h.mutations[0].variants[0].price, '521.00');
 });
+
+test('sync caches thumbnail and large image metadata; missing images stay absent', async t => {
+  const variants = [variant(1), variant(2)];
+  const image = { thumbnail: 'https://cdn.shopify.com/test-80.jpg', url: 'https://cdn.shopify.com/test-1600.jpg', altText: 'Dog cushion' };
+  variants[0].product.featuredMedia = { preview: { image } };
+  variants[1].product.featuredMedia = null;
+  const h = await harness(t, variants); await h.setup();
+  const state = (await h.request('state')).data;
+  assert.deepEqual(state.products[0].image, image);
+  assert.equal(state.products[1].image, null);
+  const response = await fetch('http://127.0.0.1:' + h.app.server.address().port);
+  assert.match(response.headers.get('content-security-policy'), /img-src 'self' https:\/\/cdn.shopify.com;/);
+});

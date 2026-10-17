@@ -20,6 +20,7 @@ function fingerprint(v, checkCollections) {
 }
 function normalize(v) {
   return { id: v.id, productId: v.product.id, title: v.product.title, variant: v.title,
+    image: v.product.featuredMedia?.preview?.image ?? null,
     vendor: v.product.vendor, status: v.product.status, sku: v.inventoryItem.sku || '',
     price: decimal(v.price), compareAt: v.compareAtPrice === null ? null : decimal(v.compareAtPrice), taxable: v.taxable,
     cost: v.inventoryItem.unitCost === null ? null : decimal(v.inventoryItem.unitCost.amount),
@@ -150,7 +151,7 @@ export function createApplication(config, dependencies = {}) {
   const server = http.createServer(async (req, res) => {
     const headers = {
       'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer',
-      'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+      'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://cdn.shopify.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
       'X-Frame-Options': 'DENY',
     };
     const json = (data, status = 200, more = {}) => { res.writeHead(status, { ...headers, 'Content-Type': 'application/json; charset=utf-8', ...more }); res.end(JSON.stringify(data)); };
