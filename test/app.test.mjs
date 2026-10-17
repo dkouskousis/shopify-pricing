@@ -427,3 +427,57 @@ test('2000 selected variants apply successfully as individual Shopify writes; se
   assert.ok(variants.slice(0, 2000).every(v => v.price === '116.00'));
   assert.ok(variants.slice(2000).every(v => v.price === '100.00'));
 });
+test('manual bulk costs fill missing costs without supplier rules, update only selected costs and keep selling prices', async t => {
+  const variants = [variant(1), variant(2,'200',null), variant(3)], h = await harness(t, variants); await h.setup();
+  h.app.store.db.exec('DELETE FROM rules');
+  const p = await h.request('manual/preview',{ ids:[id(1),id(2)], field:'cost',mode:'set',value:'12,34' });
+  assert.equal(p.status,200);assert.deepEqual(p.data.items.map(i=>i.oldValue),[6000,null]);assert.equal(p.data.items[0].sku,'TEST-1');assert.equal(h.costMutations.length,0);
+  assert.equal((await h.request('apply',{id:p.data.id})).status,409);
+  assert.equal((await h.request('manual/apply',{id:p.data.id,value:'1'})).status,202);const s=await h.idle();
+  assert.equal(h.costMutations.length,2);assert.equal(h.mutations.length,0);assert.equal(variants[0].price,'100.00');assert.equal(variants[1].price,'200');assert.equal(variants[2].inventoryItem.unitCost.amount,'60.00');
+  assert.deepEqual(s.products.slice(0,2).map(v=>v.cost),[1234,1234]);assert.equal(s.audit[0].kind,'cost');assert.equal(s.audit[0].old_missing,1);assert.equal(s.audit[0].sku,'TEST-2');assert.equal(s.audit[0].status,'success');
+  assert.equal((await h.request('manual/apply',{id:p.data.id})).status,409);
+});
+test('manual bulk selling price changes use existing selling price, preserve exact cents and never change costs or supplier rules', async t => {
+  const variants = [variant(1,'100'), variant(2,'200')], h=await harness(t,variants);await h.setup();
+  const rules=h.app.store.rules();const p=await h.request('manual/preview',{ids:[id(1),id(2)],field:'price',mode:'percent',value:'-10'});
+  assert.equal(p.status,200);assert.deepEqual(p.data.items.map(i=>i.newValue),[9000,18000]);await h.request('manual/apply',{id:p.data.id});const s=await h.idle();
+  assert.deepEqual(s.products.map(v=>v.price),[9000,18000]);assert.equal(h.costMutations.length,0);assert.deepEqual(h.app.store.rules(),rules);assert.equal(s.audit[0].kind,'price');assert.equal(s.audit[0].sku,'TEST-2');
+  const exact=(await h.request('manual/preview',{ids:[id(1)],field:'price',mode:'set',value:'20'})).data;
+  await h.request('manual/apply',{id:exact.id});await h.idle();assert.equal(variants[0].price,'20.00');
+});
+test('manual bulk preview validates modes, currencies, missing cost, size, CSRF and preview kinds', async t => {
+  const h=await harness(t,[variant(1),variant(2,'100',null)]);await h.setup();const input={ids:[id(1)],field:'cost',mode:'fixed',value:'2'};
+  assert.equal((await h.request('manual/preview',input,{'X-CSRF-Token':''})).status,403);
+  for(const change of [{field:'other'},{mode:'other'},{value:'abc'},{value:'-1000'},{ids:[]},{ids:[id(1),id(1)]},{ids:Array.from({length:2001},(_,i)=>id(i+1))},{ids:[id(2)]}])assert.equal((await h.request('manual/preview',{...input,...change})).status,400);
+  assert.equal((await h.request('manual/preview',{...input,field:'price',mode:'set',value:'0'})).status,400);
+  const normal=(await h.request('preview',{ids:[id(1)]})).data;assert.equal((await h.request('manual/apply',{id:normal.id})).status,409);
+  const v=h.app.store.variant(id(1));h.app.store.db.prepare('UPDATE variants SET data=? WHERE id=?').run(JSON.stringify({...v,currency:'USD'}),v.id);
+  assert.equal((await h.request('manual/preview',input)).status,400);
+});
+test('manual bulk costs reject stale live costs per variant and continue the other selected writes', async t=>{
+  const variants=[variant(1),variant(2)],h=await harness(t,variants);await h.setup();
+  const p=(await h.request('manual/preview',{ids:[id(1),id(2)],field:'cost',mode:'fixed',value:'2'})).data;
+  variants[0].inventoryItem.unitCost.amount='65';await h.request('manual/apply',{id:p.id});const s=await h.idle();
+  assert.equal(h.costMutations.length,1);assert.equal(variants[0].inventoryItem.unitCost.amount,'65');assert.equal(variants[1].inventoryItem.unitCost.amount,'62.00');
+  assert.equal(s.audit.find(a=>a.variant_id===id(1)).status,'failed');assert.equal(s.audit.find(a=>a.variant_id===id(2)).status,'success');assert.equal(s.job.completed,2);
+});
+test('manual bulk selling prices protect fresh compare-at conflicts and uncertain results are never replayed', async t=>{
+  const variants=[variant(1),variant(2)],h=await harness(t,variants);await h.setup();
+  const p=(await h.request('manual/preview',{ids:[id(1),id(2)],field:'price',mode:'fixed',value:'2'})).data;
+  variants[0].compareAtPrice='101';h.setMutationError();await h.request('manual/apply',{id:p.id});const s=await h.idle();
+  assert.equal(h.mutations.length,1);assert.equal(s.audit.find(a=>a.variant_id===id(1)).status,'failed');assert.equal(s.audit.find(a=>a.variant_id===id(2)).status,'uncertain');assert.equal(s.products[1].price,10000);
+  assert.equal((await h.request('manual/apply',{id:p.id})).status,409);
+});
+test('expired manual bulk previews are rejected',async t=>{
+  const h=await harness(t);await h.setup();const p=(await h.request('manual/preview',{ids:[id(1)],field:'cost',mode:'set',value:'50'})).data;
+  h.app.store.db.prepare('UPDATE previews SET expires=0 WHERE id=?').run(p.id);assert.equal((await h.request('manual/apply',{id:p.id})).status,409);assert.equal(h.costMutations.length,0);
+});
+test('manual bulk costs apply 2000 selected variants as individually verified writes',async t=>{
+  const variants=Array.from({length:2000},(_,i)=>variant(i+1)),h=await harness(t,variants);
+  await h.login();h.app.store.saveSettings({shop:'example.myshopify.com',mode:'access_token',accessToken:'mock'});
+  const insert=h.app.store.db.prepare('INSERT INTO variants VALUES (?,?)');
+  for(const v of variants)insert.run(v.id,JSON.stringify({id:v.id,productId:v.product.id,title:v.product.title,variant:v.title,sku:v.inventoryItem.sku,vendor:v.product.vendor,status:'ACTIVE',price:10000,cost:6000,currency:'EUR',taxable:true,compareAt:null,collectionIds:[]}));
+  const p=await h.request('manual/preview',{ids:variants.map(v=>v.id),field:'cost',mode:'percent',value:'-10'});assert.equal(p.status,200);assert.equal(p.data.items.length,2000);
+  assert.equal((await h.request('manual/apply',{id:p.data.id})).status,202);const s=await h.idle();assert.equal(h.costMutations.length,2000);assert.equal(h.mutations.length,0);assert.equal(s.job.completed,2000);assert.equal(s.audit.length,2000);assert.ok(s.audit.every(a=>a.status==='success'&&a.kind==='cost'));assert.equal(variants[1999].inventoryItem.unitCost.amount,'54.00');
+});

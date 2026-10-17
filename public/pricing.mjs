@@ -67,3 +67,17 @@ export function calculate(cost, rule, taxable = true, collectionIds = null) {
   const profit = net - cost;
   return { final, net, profit, margin: net ? Math.round(profit / net * 10000) / 100 : 0, fixed, referencePrice, requiresCollections };
 }
+
+// Manual bulk edits use exact cents, independently of supplier rules and VAT.
+export function bulkAmount(current, mode, value) {
+  if (mode === 'set') return decimal(value, 'Νέα τιμή');
+  if (!['fixed', 'percent'].includes(mode)) throw new Error('Επίλεξε τρόπο αλλαγής.');
+  if (current === null) throw new Error('Υπάρχει προϊόν χωρίς συμπληρωμένη τιμή. Χρησιμοποίησε «Ίδια τιμή για όλα».');
+  if (!Number.isSafeInteger(current) || current < 0) throw new Error('Μη έγκυρη τωρινή τιμή.');
+  const text = String(value ?? '').trim().replace(',', '.');
+  if (!/^[+-]?\d+(?:\.\d{1,2})?$/.test(text) || Math.abs(Number(text)) > 1000000) throw new Error('Βάλε ποσό ή ποσοστό με έως δύο δεκαδικά.');
+  const change = Math.round(Number(text.replace(/^[+-]/, '')) * 100) * (text.startsWith('-') ? -1 : 1);
+  const result = mode === 'fixed' ? current + change : Math.round(current * (10000 + change) / 10000);
+  if (!Number.isSafeInteger(result) || result < 0 || result > 100000000) throw new Error('Η νέα τιμή πρέπει να είναι από 0 έως 1.000.000€.');
+  return result;
+}

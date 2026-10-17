@@ -17,3 +17,6 @@
 
 #shipping .price-up, #shipping-preview-dialog .price-up { color:#167044; font-weight:600; }
 #shipping .price-down, #shipping-preview-dialog .price-down { color:#b42318; font-weight:600; }
+
+#bulk-dialog { width:min(600px,95vw); }
+#bulk-preview-dialog { width:min(1000px,95vw); }

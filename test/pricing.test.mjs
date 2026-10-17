@@ -168,3 +168,9 @@ test('multiples of five euros become five cents less after VAT and conditional c
   assert.equal(charged.referencePrice, 30000); // Price bands are tested before the final ending adjustment.
   assert.equal(charged.final, 32495);
 });
+test('manual bulk amounts support exact replacement and signed adjustments without pricing rule rounding',async()=>{
+  const {bulkAmount}=await import('../pricing.mjs');
+  assert.equal(bulkAmount(null,'set','20'),2000);assert.equal(bulkAmount(6000,'fixed','+2'),6200);assert.equal(bulkAmount(6000,'fixed','-1,25'),5875);
+  assert.equal(bulkAmount(6000,'percent','-10'),5400);assert.equal(bulkAmount(1995,'percent','10'),2195);assert.equal(bulkAmount(1234,'set','0'),0);
+  assert.throws(()=>bulkAmount(null,'percent','10'));assert.throws(()=>bulkAmount(1000,'fixed','-11'));assert.throws(()=>bulkAmount(1000,'percent','-110'));assert.throws(()=>bulkAmount(1000,'set','1.234'));
+});

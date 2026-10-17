@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { createShippingService } from './shipping-service.mjs';
 import { openStore } from './store.mjs';
-import { decimal, money, validateRule, calculate } from './pricing.mjs';
+import { decimal, money, validateRule, calculate, bulkAmount } from './pricing.mjs';
 import { QUERIES, validateSettings, createShopify, collectionPages, productCollectionIds } from './shopify.mjs';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
@@ -149,6 +149,92 @@ export function createApplication(config, dependencies = {}) {
     job.message = `${success} ενημερώσεις ολοκληρώθηκαν, ${failed} χρειάζονται έλεγχο.${shuttingDown ? ' Η εργασία σταμάτησε λόγω επανεκκίνησης.' : ''} Δες το ιστορικό.`;
   }
 
+  async function savePrice(cached, amount) {
+    const audit = db.prepare('INSERT INTO audit(created,variant_id,title,old_price,new_price,status,detail) VALUES (?,?,?,?,?,?,?)')
+      .run(new Date().toISOString(), cached.id, `${cached.title} / ${cached.variant}`, cached.price, amount, 'pending', 'Χειροκίνητη αλλαγή τιμής');
+    priceSaving = true;
+    let sending = false;
+    try {
+      const api = graphql();
+      const fresh = (await api(QUERIES.check, { id: cached.id })).productVariant;
+      if (!fresh || fresh.product.id !== cached.productId) fail('Η παραλλαγή δεν υπάρχει πλέον ή άλλαξε προϊόν.');
+      if (decimal(fresh.price) !== cached.price) fail('Η τιμή άλλαξε στο Shopify. Κάνε συγχρονισμό πριν την αντικαταστήσεις.', 409);
+      const compareAt = fresh.compareAtPrice === null ? null : decimal(fresh.compareAtPrice);
+      if (compareAt > 0 && amount >= compareAt) fail('Η νέα τιμή φτάνει/ξεπερνά την Compare-at price. Έλεγξέ την πρώτα στο Shopify.');
+      sending = true;
+      const payload = (await api(QUERIES.update, { productId: cached.productId, variants: [{ id: cached.id, price: money(amount) }] })).productVariantsBulkUpdate;
+      if (payload.userErrors.length) { sending = false; fail(payload.userErrors.map(e => e.message).join('; ')); }
+      const updated = payload.productVariants.find(v => v.id === cached.id);
+      if (!updated || decimal(updated.price) !== amount) fail('Δεν επιβεβαιώθηκε η αποθήκευση της τιμής. Συγχρόνισε και έλεγξε το Shopify.');
+      const readback = (await api(QUERIES.check, { id: cached.id })).productVariant;
+      if (!readback || readback.product.id !== cached.productId || decimal(readback.price) !== amount) fail('Δεν επιβεβαιώθηκε η νέα τιμή με επανέλεγχο. Συγχρόνισε και έλεγξε το Shopify.');
+      db.prepare('UPDATE variants SET data=? WHERE id=?').run(JSON.stringify({ ...cached, price: amount, compareAt }), cached.id);
+      invalidate();
+      db.prepare("UPDATE audit SET status='success',detail='Χειροκίνητη αλλαγή τιμής' WHERE id=?").run(audit.lastInsertRowid);
+      return { ok: true, price: amount };
+    } catch (error) {
+      invalidate();
+      db.prepare('UPDATE audit SET status=?,detail=? WHERE id=?').run(sending ? 'uncertain' : 'failed', safeError(error), audit.lastInsertRowid);
+      if (sending) fail(`Το αποτέλεσμα της ενημέρωσης τιμής είναι αβέβαιο. Κάνε συγχρονισμό και έλεγξε το Shopify πριν ξαναδοκιμάσεις. ${safeError(error)}`);
+      throw error;
+    } finally { priceSaving = false; }
+  }
+
+  async function saveCost(cached, amount) {
+    const audit = db.prepare('INSERT INTO audit(created,variant_id,title,old_price,new_price,status,detail,kind,old_missing) VALUES (?,?,?,?,?,?,?,?,?)')
+      .run(new Date().toISOString(), cached.id, `${cached.title} / ${cached.variant}`, cached.cost ?? 0, amount, 'pending', '', 'cost', cached.cost === null ? 1 : 0);
+    costSaving = true;
+    let sending = false;
+    try {
+      const api = graphql();
+      const fresh = (await api(QUERIES.check, { id: cached.id })).productVariant;
+      if (!fresh || fresh.product.id !== cached.productId) fail('Η παραλλαγή δεν υπάρχει πλέον ή άλλαξε προϊόν.');
+      const oldCost = fresh.inventoryItem.unitCost === null ? null : decimal(fresh.inventoryItem.unitCost.amount);
+      if (oldCost !== cached.cost) fail('Το κόστος άλλαξε στο Shopify. Κάνε συγχρονισμό πριν το αντικαταστήσεις.', 409);
+      if (fresh.inventoryItem.unitCost && fresh.inventoryItem.unitCost.currencyCode !== 'EUR') fail('Το κόστος δεν είναι σε EUR.');
+      sending = true;
+      const payload = (await api(QUERIES.updateCost, { id: fresh.inventoryItem.id, input: { cost: money(amount) } })).inventoryItemUpdate;
+      if (payload.userErrors.length) { sending = false; fail(payload.userErrors.map(e => e.message).join('; ')); }
+      if (payload.inventoryItem?.id !== fresh.inventoryItem.id || !payload.inventoryItem.unitCost
+        || payload.inventoryItem.unitCost.currencyCode !== 'EUR' || decimal(payload.inventoryItem.unitCost.amount) !== amount) fail('Δεν επιβεβαιώθηκε η ενημέρωση κόστους. Συγχρόνισε και έλεγξε το Shopify πριν ξαναδοκιμάσεις.');
+      const readback = (await api(QUERIES.check, { id: cached.id })).productVariant;
+      if (!readback || readback.inventoryItem.id !== fresh.inventoryItem.id || !readback.inventoryItem.unitCost
+        || readback.inventoryItem.unitCost.currencyCode !== 'EUR' || decimal(readback.inventoryItem.unitCost.amount) !== amount) fail('Δεν επιβεβαιώθηκε η νέα τιμή αγοράς με επανέλεγχο. Συγχρόνισε και έλεγξε το Shopify.');
+      db.prepare('UPDATE variants SET data=? WHERE id=?').run(JSON.stringify({ ...cached, cost: amount, currency: 'EUR' }), cached.id);
+      invalidate();
+      db.prepare("UPDATE audit SET status='success',detail='' WHERE id=?").run(audit.lastInsertRowid);
+      return { ok: true, cost: amount };
+    } catch (error) {
+      invalidate();
+      db.prepare('UPDATE audit SET status=?,detail=? WHERE id=?').run(sending ? 'uncertain' : 'failed', safeError(error), audit.lastInsertRowid);
+      if (sending) fail(`Το αποτέλεσμα της ενημέρωσης κόστους είναι αβέβαιο. Κάνε συγχρονισμό και έλεγξε το Shopify πριν ξαναδοκιμάσεις. ${safeError(error)}`);
+      throw error;
+    } finally { costSaving = false; }
+  }
+  async function applyManual(plan) {
+    job.total = plan.items.length;
+    let success = 0, failed = 0;
+    for (const item of plan.items) {
+      if (shuttingDown) break;
+      let attempted = false;
+      try {
+        const cached = store.variant(item.id);
+        if (!cached || cached.productId !== item.productId || cached[plan.field] !== item.oldValue
+          || (plan.field === 'cost' && cached.currency !== item.currency)) fail('Τα τοπικά στοιχεία άλλαξαν. Κάνε νέα προεπισκόπηση.');
+        attempted = true;
+        if (plan.field === 'cost') await saveCost(cached, item.newValue);
+        else await savePrice(cached, item.newValue);
+        success++;
+      } catch (error) {
+        failed++;
+        if (!attempted) db.prepare('INSERT INTO audit(created,variant_id,title,old_price,new_price,status,detail,kind,old_missing,sku) VALUES (?,?,?,?,?,?,?,?,?,?)')
+          .run(new Date().toISOString(), item.id, item.title, item.oldValue ?? 0, item.newValue, 'failed', safeError(error), plan.field, item.oldValue === null ? 1 : 0, item.sku || '');
+      }
+      job.completed++;
+    }
+    job.message = `Μαζική αλλαγή ${plan.field === 'cost' ? 'κόστους' : 'τιμής πώλησης'}: ${success} ενημερώθηκαν, ${failed} χρειάζονται έλεγχο. Δες το ιστορικό.${shuttingDown ? ' Η εργασία διακόπηκε λόγω επανεκκίνησης.' : ''}`;
+  }
+
   const shipping = createShippingService({ store, graphql, startJob, jobState: () => job, safeError, stopping: () => shuttingDown, makeDhl: dependencies.makeDhl });
   const server = http.createServer(async (req, res) => {
     const headers = {
@@ -221,34 +307,7 @@ export function createApplication(config, dependencies = {}) {
           if (amount <= 0) fail('Η τελική τιμή πρέπει να είναι μεγαλύτερη από μηδέν.');
           if (input.expectedPrice !== cached.price) fail('Η τιμή έχει αλλάξει. Ανανέωσε τη λίστα και δοκίμασε ξανά.', 409);
           if (amount === cached.price) return json({ ok: true, unchanged: true });
-          const audit = db.prepare('INSERT INTO audit(created,variant_id,title,old_price,new_price,status,detail) VALUES (?,?,?,?,?,?,?)')
-            .run(new Date().toISOString(), cached.id, `${cached.title} / ${cached.variant}`, cached.price, amount, 'pending', 'Χειροκίνητη αλλαγή τιμής');
-          priceSaving = true;
-          let sending = false;
-          try {
-            const api = graphql();
-            const fresh = (await api(QUERIES.check, { id: cached.id })).productVariant;
-            if (!fresh || fresh.product.id !== cached.productId) fail('Η παραλλαγή δεν υπάρχει πλέον ή άλλαξε προϊόν.');
-            if (decimal(fresh.price) !== cached.price) fail('Η τιμή άλλαξε στο Shopify. Κάνε συγχρονισμό πριν την αντικαταστήσεις.', 409);
-            const compareAt = fresh.compareAtPrice === null ? null : decimal(fresh.compareAtPrice);
-            if (compareAt > 0 && amount >= compareAt) fail('Η νέα τιμή φτάνει/ξεπερνά την Compare-at price. Έλεγξέ την πρώτα στο Shopify.');
-            sending = true;
-            const payload = (await api(QUERIES.update, { productId: cached.productId, variants: [{ id: cached.id, price: money(amount) }] })).productVariantsBulkUpdate;
-            if (payload.userErrors.length) { sending = false; fail(payload.userErrors.map(e => e.message).join('; ')); }
-            const updated = payload.productVariants.find(v => v.id === cached.id);
-            if (!updated || decimal(updated.price) !== amount) fail('Δεν επιβεβαιώθηκε η αποθήκευση της τιμής. Συγχρόνισε και έλεγξε το Shopify.');
-            const readback = (await api(QUERIES.check, { id: cached.id })).productVariant;
-            if (!readback || readback.product.id !== cached.productId || decimal(readback.price) !== amount) fail('Δεν επιβεβαιώθηκε η νέα τιμή με επανέλεγχο. Συγχρόνισε και έλεγξε το Shopify.');
-            db.prepare('UPDATE variants SET data=? WHERE id=?').run(JSON.stringify({ ...cached, price: amount, compareAt }), cached.id);
-            invalidate();
-            db.prepare("UPDATE audit SET status='success',detail='Χειροκίνητη αλλαγή τιμής' WHERE id=?").run(audit.lastInsertRowid);
-            return json({ ok: true, price: amount });
-          } catch (error) {
-            invalidate();
-            db.prepare('UPDATE audit SET status=?,detail=? WHERE id=?').run(sending ? 'uncertain' : 'failed', safeError(error), audit.lastInsertRowid);
-            if (sending) fail(`Το αποτέλεσμα της ενημέρωσης τιμής είναι αβέβαιο. Κάνε συγχρονισμό και έλεγξε το Shopify πριν ξαναδοκιμάσεις. ${safeError(error)}`);
-            throw error;
-          } finally { priceSaving = false; }
+          return json(await savePrice(cached, amount));
         }
         if (url.pathname === '/api/cost') {
           const cached = store.variant(input.id);
@@ -256,37 +315,34 @@ export function createApplication(config, dependencies = {}) {
           const amount = decimal(input.cost, 'Τιμή αγοράς');
           if (input.expectedCost !== cached.cost) fail('Το κόστος έχει αλλάξει. Ανανέωσε τη λίστα και δοκίμασε ξανά.', 409);
           if (amount === cached.cost) return json({ ok: true, unchanged: true });
-          const audit = db.prepare('INSERT INTO audit(created,variant_id,title,old_price,new_price,status,detail,kind,old_missing) VALUES (?,?,?,?,?,?,?,?,?)')
-            .run(new Date().toISOString(), cached.id, `${cached.title} / ${cached.variant}`, cached.cost ?? 0, amount, 'pending', '', 'cost', cached.cost === null ? 1 : 0);
-          costSaving = true;
-          let sending = false;
-          try {
-            const api = graphql();
-            const fresh = (await api(QUERIES.check, { id: cached.id })).productVariant;
-            if (!fresh || fresh.product.id !== cached.productId) fail('Η παραλλαγή δεν υπάρχει πλέον ή άλλαξε προϊόν.');
-            const oldCost = fresh.inventoryItem.unitCost === null ? null : decimal(fresh.inventoryItem.unitCost.amount);
-            if (oldCost !== cached.cost) fail('Το κόστος άλλαξε στο Shopify. Κάνε συγχρονισμό πριν το αντικαταστήσεις.', 409);
-            if (fresh.inventoryItem.unitCost && fresh.inventoryItem.unitCost.currencyCode !== 'EUR') fail('Το κόστος δεν είναι σε EUR.');
-            sending = true;
-            const payload = (await api(QUERIES.updateCost, { id: fresh.inventoryItem.id, input: { cost: money(amount) } })).inventoryItemUpdate;
-            if (payload.userErrors.length) { sending = false; fail(payload.userErrors.map(e => e.message).join('; ')); }
-            if (payload.inventoryItem?.id !== fresh.inventoryItem.id || !payload.inventoryItem.unitCost
-              || payload.inventoryItem.unitCost.currencyCode !== 'EUR' || decimal(payload.inventoryItem.unitCost.amount) !== amount) fail('Δεν επιβεβαιώθηκε η ενημέρωση κόστους. Συγχρόνισε και έλεγξε το Shopify πριν ξαναδοκιμάσεις.');
-            const readback = (await api(QUERIES.check, { id: cached.id })).productVariant;
-            if (!readback || readback.inventoryItem.id !== fresh.inventoryItem.id || !readback.inventoryItem.unitCost
-              || readback.inventoryItem.unitCost.currencyCode !== 'EUR' || decimal(readback.inventoryItem.unitCost.amount) !== amount) fail('Δεν επιβεβαιώθηκε η νέα τιμή αγοράς με επανέλεγχο. Συγχρόνισε και έλεγξε το Shopify.');
-            db.prepare('UPDATE variants SET data=? WHERE id=?').run(JSON.stringify({ ...cached, cost: amount, currency: 'EUR' }), cached.id);
-            invalidate();
-            db.prepare("UPDATE audit SET status='success',detail='' WHERE id=?").run(audit.lastInsertRowid);
-            return json({ ok: true, cost: amount });
-          } catch (error) {
-            invalidate();
-            db.prepare('UPDATE audit SET status=?,detail=? WHERE id=?').run(sending ? 'uncertain' : 'failed', safeError(error), audit.lastInsertRowid);
-            if (sending) fail(`Το αποτέλεσμα της ενημέρωσης κόστους είναι αβέβαιο. Κάνε συγχρονισμό και έλεγξε το Shopify πριν ξαναδοκιμάσεις. ${safeError(error)}`);
-            throw error;
-          } finally { costSaving = false; }
+          return json(await saveCost(cached, amount));
         }
         if (url.pathname === '/api/sync') { startJob('sync', sync); return json({ ok: true }, 202); }
+        if (url.pathname === '/api/manual/preview') {
+          if (!['cost', 'price'].includes(input.field)) fail('Επίλεξε κόστος αγοράς ή τιμή πώλησης.');
+          if (!Array.isArray(input.ids) || !input.ids.length || input.ids.length > 2000 || new Set(input.ids).size !== input.ids.length) fail('Επίλεξε 1–2.000 διαφορετικές παραλλαγές.');
+          const items = input.ids.map(id => {
+            const v = store.variant(id); if (!v) fail('Δεν βρέθηκε η παραλλαγή.');
+            if (input.field === 'cost' && v.currency && v.currency !== 'EUR') fail(`${v.title}: το κόστος δεν είναι σε EUR.`);
+            const oldValue = v[input.field], newValue = bulkAmount(oldValue, input.mode, input.value);
+            if (input.field === 'price' && newValue <= 0) fail('Η τιμή πώλησης πρέπει να είναι μεγαλύτερη από μηδέν.');
+            if (input.field === 'price' && v.compareAt > 0 && newValue >= v.compareAt) fail(`${v.title}: η νέα τιμή φτάνει/ξεπερνά την Compare-at price.`);
+            return { id, productId: v.productId, title: `${v.title} / ${v.variant}`, sku: v.sku, oldValue, newValue, currency: v.currency };
+          }).filter(i => i.oldValue !== i.newValue);
+          if (!items.length) fail('Δεν προκύπτει αλλαγή.');
+          const id = random(), expires = Date.now() + 15 * 60000;
+          db.prepare('DELETE FROM previews WHERE expires<? OR consumed=1').run(Date.now());
+          db.prepare('INSERT INTO previews(id,data,expires) VALUES (?,?,?)').run(id, JSON.stringify({ kind: 'manual', field: input.field, items }), expires);
+          return json({ id, expires, field: input.field, items });
+        }
+        if (url.pathname === '/api/manual/apply') {
+          const preview = db.prepare('SELECT * FROM previews WHERE id=? AND consumed=0 AND expires>?').get(String(input.id), Date.now());
+          if (!preview) fail('Η προεπισκόπηση έληξε ή χρησιμοποιήθηκε. Κάνε νέα προεπισκόπηση.', 409);
+          const plan = JSON.parse(preview.data);
+          if (plan.kind !== 'manual') fail('Μη έγκυρος τύπος προεπισκόπησης.', 409);
+          db.prepare('UPDATE previews SET consumed=1 WHERE id=?').run(preview.id);
+          startJob('manual', () => applyManual(plan)); return json({ ok: true }, 202);
+        }
         if (url.pathname === '/api/preview') {
           if (!Array.isArray(input.ids) || !input.ids.length || input.ids.length > 2000 || new Set(input.ids).size !== input.ids.length) fail('Επίλεξε 1–2.000 διαφορετικές παραλλαγές.');
           const items = input.ids.map(id => {
@@ -305,6 +361,7 @@ export function createApplication(config, dependencies = {}) {
           const preview = db.prepare('SELECT * FROM previews WHERE id=? AND consumed=0 AND expires>?').get(String(input.id), Date.now());
           if (!preview) fail('Η προεπισκόπηση έληξε ή έχει ήδη χρησιμοποιηθεί. Κάνε νέα προεπισκόπηση.', 409);
           const plan = JSON.parse(preview.data);
+          if (plan.kind === 'manual') fail('Χρησιμοποίησε τη μαζική χειροκίνητη επεξεργασία.', 409);
           db.prepare('UPDATE previews SET consumed=1 WHERE id=?').run(preview.id);
           startJob('apply', () => apply(plan)); return json({ ok: true }, 202);
         }
