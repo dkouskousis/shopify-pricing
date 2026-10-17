@@ -61,7 +61,8 @@ export function calculate(cost, rule, taxable = true, collectionIds = null) {
   const requiresCollections = priceConditions.some(c => c.collectionId);
   if (requiresCollections && !Array.isArray(collectionIds)) return { error: 'Κάνε συγχρονισμό Shopify για τα collections πριν υπολογιστούν οι όροι.' };
   const fixed = priceConditions.filter(c => !c.collectionId || collectionIds.includes(c.collectionId)).reduce((sum, c) => sum + c.amount, 0);
-  const final = roundedPrice((numerator + BigInt(fixed) * denominator) * vatFactor, totalDenominator);
+  const rounded = roundedPrice((numerator + BigInt(fixed) * denominator) * vatFactor, totalDenominator);
+  const final = rounded % 500 === 0 ? rounded - 5 : rounded;
   const net = Number(roundDivide(BigInt(final) * 10000n, BigInt(taxable ? 10000 + rule.vat : 10000)));
   const profit = net - cost;
   return { final, net, profit, margin: net ? Math.round(profit / net * 10000) / 100 : 0, fixed, referencePrice, requiresCollections };

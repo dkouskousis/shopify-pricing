@@ -121,7 +121,7 @@ test('rule edits invalidate saved previews', async t => {
   const p = (await h.request('preview', { ids: [id(1)] })).data;
   await h.request('rules', { vendor: 'Example', conditions: [], mode: 'multiplier', multiplier: '1.60', vat: '24', addVat: true });
   assert.equal((await h.request('apply', { id: p.id })).status, 409);
-  assert.equal((await h.request('state')).data.products[0].result.final, 12000);
+  assert.equal((await h.request('state')).data.products[0].result.final, 11995);
 });
 test('compare-at price conflicts block changes without touching the sale setup', async t => {
   const v = variant(1); v.compareAtPrice = '110';
@@ -180,7 +180,7 @@ test('editing cost saves only the selected inventory item, verifies readback and
   assert.equal(variants[1].inventoryItem.unitCost.amount, '60.00');
   const state = (await h.request('state')).data;
   assert.equal(state.products.find(v => v.id === id(1)).cost, 6500);
-  assert.equal(state.products.find(v => v.id === id(1)).result.final, 12500);
+  assert.equal(state.products.find(v => v.id === id(1)).result.final, 12495);
   assert.equal(state.audit[0].kind, 'cost');
   assert.equal(state.audit[0].status, 'success');
   assert.equal((await h.request('apply', { id: preview.id })).status, 409);
@@ -226,8 +226,8 @@ test('margin rules persist, preview and apply the intended price, then recalcula
   assert.equal(h.mutations[0].variants[0].price, '124.00');
   await h.request('cost', { id: id(1), cost: '65', expectedCost: 6000 });
   const after = (await h.request('state')).data;
-  assert.equal(after.products[0].result.final, 13500);
-  assert.equal(after.products[0].result.margin, 40.3);
+  assert.equal(after.products[0].result.final, 13495);
+  assert.equal(after.products[0].result.margin, 40.27);
 });
 test('fixed rule amount persists and flows through preview and Shopify price apply', async t => {
   const h = await harness(t); await h.setup();
@@ -302,7 +302,7 @@ test('failed collections sync keeps previous variants, collections and timestamp
 test('one preview applies both products inside and outside additional charge ranges', async t => {
   for (const settings of [
     { mode: 'multiplier', multiplier: '1.55', addVat: true, prices: ['116.00', '608.00'] },
-    { mode: 'multiplier', multiplier: '1.55', addVat: false, prices: ['93.00', '490.00'] },
+    { mode: 'multiplier', multiplier: '1.55', addVat: false, prices: ['93.00', '489.95'] },
     { mode: 'margin', targetMargin: '40', addVat: true, prices: ['124.00', '651.00'] },
   ]) await t.test(`${settings.mode}, addVat=${settings.addVat}`, async t => {
     const h = await harness(t, [variant(1, '100', '60'), variant(2, '100', '300')]); await h.setup();
@@ -394,4 +394,17 @@ test('uncertain manual price writes preserve cached price and log uncertainty', 
   assert.equal(state.products[0].price, 10000);
   assert.equal(state.audit[0].status, 'uncertain');
   assert.equal(state.job.priceSaving, false);
+});
+
+test('five-cent endings are identical in state, preview and automatic Shopify writes; manual prices remain exact', async t => {
+  const h = await harness(t, [variant(1, '30.00', '20.00')]); await h.setup();
+  await h.request('rules', { vendor: 'Example', mode: 'multiplier', multiplier: '1', vat: '0', addVat: false, conditions: [] });
+  const state = (await h.request('state')).data;
+  assert.equal(state.products[0].result.final, 1995);
+  const plan = (await h.request('preview', { ids: [id(1)] })).data;
+  assert.equal(plan.items[0].newPrice, 1995);
+  await h.request('apply', { id: plan.id }); await h.idle();
+  assert.equal(h.mutations[0].variants[0].price, '19.95');
+  await h.request('price', { id: id(1), price: '20.00', expectedPrice: 1995 });
+  assert.equal(h.mutations[1].variants[0].price, '20.00');
 });

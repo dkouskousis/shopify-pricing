@@ -2,9 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { decimal, calculate, validateRule, priceMultiplier } from '../pricing.mjs';
 const rule = (addVat = true) => validateRule({ vendor: 'Example', conditions: [], mode: 'multiplier', multiplier: '1.55', vat: '24', addVat });
-test('upward rounding respects half-euro steps, the €20 boundary and exact prices', () => {
+test('rounding respects half-euro steps and applies the final five-cent ending', () => {
   const identity = validateRule({ vendor: 'Test', conditions: [], mode: 'multiplier', multiplier: '1', vat: '0', addVat: false });
-  for (const [cost, final] of [[1, 50], [812, 850], [850, 850], [851, 900], [1950, 1950], [1951, 2000], [1999, 2000], [2000, 2000], [2001, 2100], [2050, 2100], [12435, 12500], [12500, 12500]]) {
+  for (const [cost, final] of [[1, 50], [812, 850], [850, 850], [851, 900], [1950, 1950], [1951, 1995], [1999, 1995], [2000, 1995], [2001, 2100], [2050, 2100], [12435, 12495], [12500, 12495]]) {
     assert.equal(calculate(cost, identity, false).final, final);
   }
   // Less than half a cent above a valid ending still rounds upward.
@@ -52,18 +52,18 @@ test('margin mode targets net sales margin instead of purchase markup', () => {
   assert.equal(result.profit, 4000);
   assert.equal(result.margin, 40);
   const markedUp = calculate(6000, validateRule({ vendor: 'Example', conditions: [], mode: 'multiplier', multiplier: '1.4', vat: '24', addVat: true }));
-  assert.equal(markedUp.final, 10500);
-  assert.equal(markedUp.margin, 29.15);
+  assert.equal(markedUp.final, 10495);
+  assert.equal(markedUp.margin, 29.11);
 });
 test('margin mode preserves optional VAT behavior and distinguishes taxable sales', () => {
   const rule = validateRule({ vendor: 'Example', conditions: [], mode: 'margin', targetMargin: '40', vat: '24', addVat: false });
-  assert.equal(calculate(6000, rule).final, 10000);
-  assert.equal(calculate(6000, rule).margin, 25.6);
-  assert.equal(calculate(6000, rule, false).margin, 40);
+  assert.equal(calculate(6000, rule).final, 9995);
+  assert.equal(calculate(6000, rule).margin, 25.56);
+  assert.equal(calculate(6000, rule, false).margin, 39.97);
 });
 test('margin validation accepts zero and decimals, rejects 100% and malformed inputs', () => {
   const input = { vendor: 'Example', conditions: [], mode: 'margin', vat: '24', addVat: true };
-  assert.equal(calculate(6000, validateRule({ ...input, targetMargin: '0' })).final, 7500);
+  assert.equal(calculate(6000, validateRule({ ...input, targetMargin: '0' })).final, 7495);
   assert.equal(validateRule({ ...input, targetMargin: '33,33' }).targetMargin, 3333);
   assert.equal(calculate(1, validateRule({ ...input, targetMargin: '99.99' })).final, 12400);
   for (const targetMargin of ['', '100', '101', '-1', '20.123', 'Infinity']) assert.throws(() => validateRule({ ...input, targetMargin }));
@@ -76,7 +76,7 @@ test('fixed addition comes after multiplication and before optional VAT', () => 
   assert.equal(result.net, 9435);
   assert.equal(result.profit, 3435);
   assert.equal(calculate(6000, validateRule({ ...input, addVat: false })).final, 9400);
-  assert.equal(calculate(6000, validateRule({ ...input, conditions: [] })).final, 10500);
+  assert.equal(calculate(6000, validateRule({ ...input, conditions: [] })).final, 10495);
 });
 test('fixed addition applies after the base margin price and updates actual gross margin', () => {
   const rule = validateRule({ vendor: 'Example', conditions: [{ from: '0', to: '1000', amount: '10', collectionId: '' }], mode: 'margin', targetMargin: '40', vat: '24', addVat: true });
@@ -95,8 +95,8 @@ test('conditions use one rounded reference price, sum overlaps and never cascade
   const r = validateRule({ vendor: 'Test', mode: 'multiplier', multiplier: '1', vat: '24', addVat: false, conditions });
   assert.equal(calculate(4950, r).referencePrice, 5000);
   assert.equal(calculate(4950, r).fixed, 500);
-  assert.equal(calculate(4950, r).final, 5500);
-  assert.equal(calculate(4950, { ...r, conditions: [...r.conditions].reverse() }).final, 5500);
+  assert.equal(calculate(4950, r).final, 5495);
+  assert.equal(calculate(4950, { ...r, conditions: [...r.conditions].reverse() }).final, 5495);
   assert.equal(calculate(5001, r).fixed, 300);
   assert.equal(calculate(6100, r).fixed, 1000);
 });
@@ -117,7 +117,7 @@ test('collection and price must both match; total sums only matching conditions'
 test('condition amounts go before optional VAT and final rounding, including small prices', () => {
   const r = validateRule({ vendor: 'Test', mode: 'multiplier', multiplier: '1', vat: '24', addVat: true, conditions: [{ from: '0', to: '50', amount: '2', collectionId: '' }] });
   assert.equal(calculate(1000, r).referencePrice, 1250);
-  assert.equal(calculate(1000, r).final, 1500);
+  assert.equal(calculate(1000, r).final, 1495);
   assert.equal(calculate(1000, { ...r, addVat: false }).final, 1200);
   assert.equal(calculate(1000, r).fixed, 200);
 });
@@ -134,7 +134,7 @@ test('no conditions means no addition, even if a removed legacy field is submitt
   const r = validateRule({ vendor: 'Test', mode: 'multiplier', multiplier: '1', vat: '24', addVat: true, fixed: '1000', conditions: [] });
   assert.equal(Object.hasOwn(r, 'fixed'), false);
   assert.equal(calculate(6000, r).fixed, 0);
-  assert.equal(calculate(6000, r).final, 7500);
+  assert.equal(calculate(6000, r).final, 7495);
 });
 
 test('price outside all charge ranges still gets the brand calculation without collections data', () => {
@@ -142,7 +142,7 @@ test('price outside all charge ranges still gets the brand calculation without c
     conditions: [{ from: '300', to: '999', amount: '25', collectionId: 'gid://shopify/Collection/1' }] };
   const r = validateRule(input);
   const outside = calculate(6000, r, true, null);
-  assert.equal(outside.final, 10500);
+  assert.equal(outside.final, 10495);
   assert.equal(outside.fixed, 0);
   assert.equal(outside.requiresCollections, false);
   assert.equal(calculate(6000, { ...r, addVat: false }, true, null).final, 8400);
@@ -151,4 +151,20 @@ test('price outside all charge ranges still gets the brand calculation without c
   const nonMember = calculate(30000, r, true, []);
   assert.equal(nonMember.final, 52100);
   assert.equal(nonMember.fixed, 0);
+});
+
+test('multiples of five euros become five cents less after VAT and conditional charges', () => {
+  const r = validateRule({ vendor: 'Test', mode: 'multiplier', multiplier: '1', vat: '0', addVat: false, conditions: [] });
+  for (const euros of [5, 10, 15, 20, 25, 30, 35, 40, 100, 200]) {
+    const result = calculate(euros * 100, r, false);
+    assert.equal(result.final, euros * 100 - 5);
+    assert.equal(result.referencePrice, euros * 100);
+    assert.equal(result.profit, -5);
+  }
+  assert.equal(calculate(2100, r, false).final, 2100);
+  assert.equal(calculate(1850, r, false).final, 1850);
+  const charged = calculate(30000, { ...r, conditions: [{ from: 30000, to: 99900, amount: 2500, collectionId: '' }] }, false);
+  assert.equal(charged.fixed, 2500);
+  assert.equal(charged.referencePrice, 30000); // Price bands are tested before the final ending adjustment.
+  assert.equal(charged.final, 32495);
 });
