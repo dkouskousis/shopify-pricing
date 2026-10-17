@@ -72,9 +72,16 @@
         <div class="section-head"><div><h2>Ιστορικό ενημερώσεων</h2><p class="muted">Οι τελευταίες 200 απόπειρες ενημέρωσης τιμής ή κόστους. Οι επιτυχίες και οι αποτυχίες καταγράφονται ξεχωριστά.</p></div></div>
         <div class="table-wrap"><table><thead><tr><th>Ημερομηνία</th><th>Ενέργεια</th><th>Προϊόν</th><th>Πριν</th><th>Μετά</th><th>Αποτέλεσμα</th></tr></thead><tbody id="audit-rows"></tbody></table></div>
       </section>
-    </main><footer>Shopify Pricing <span>v1.7.0 · Ιδιωτική διαχείριση τιμών</span></footer>
+    </main><footer>Shopify Pricing <span>v1.8.0 · Ιδιωτική διαχείριση τιμών</span></footer>
   </div>
   <dialog id="image-dialog" aria-labelledby="image-title"><div class="section-head"><h2 id="image-title"></h2><button id="close-image" type="button" class="quiet">Κλείσιμο</button></div><img id="product-image" alt="" referrerpolicy="no-referrer"></dialog>
+  <dialog id="price-dialog" aria-labelledby="price-title">
+    <div class="section-head"><div><span class="eyebrow">ΤΙΜΗ ΠΩΛΗΣΗΣ</span><h2 id="price-title">Επεξεργασία τελικής τιμής</h2></div><button id="close-price" class="quiet">Κλείσιμο</button></div>
+    <p id="price-product" class="muted"></p>
+    <form id="price-form"><label>Τελική τιμή πώλησης (€)<input name="price" inputmode="decimal" required autocomplete="off"></label>
+    <p class="footnote">Η τιμή αποθηκεύεται ακριβώς όπως τη γράφεις, χωρίς επιπλέον ΦΠΑ, χρεώσεις ή στρογγυλοποίηση. Η στήλη «Νέα τιμή» εξακολουθεί να δείχνει την πρόταση του κανόνα του brand, που μπορείς να εφαρμόσεις ξεχωριστά.</p>
+    <button id="save-price">Αποθήκευση στο Shopify</button></form>
+  </dialog>
   <dialog id="cost-dialog">
     <div class="section-head"><div><span class="eyebrow">ΤΙΜΗ ΑΓΟΡΑΣ</span><h2>Επεξεργασία κόστους</h2></div><button id="close-cost" class="quiet">Κλείσιμο</button></div>
     <p id="cost-product" class="muted"></p>

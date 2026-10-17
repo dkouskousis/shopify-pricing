@@ -349,3 +349,49 @@ test('sync caches thumbnail and large image metadata; missing images stay absent
   const response = await fetch('http://127.0.0.1:' + h.app.server.address().port);
   assert.match(response.headers.get('content-security-policy'), /img-src 'self' https:\/\/cdn.shopify.com;/);
 });
+
+test('manual selling price saves exact cents for one variant and invalidates old previews', async t => {
+  const variants = [variant(1), variant(2)]; variants[0].compareAtPrice = '150.00';
+  const h = await harness(t, variants); await h.setup();
+  const oldPlan = (await h.request('preview', { ids: [id(1)] })).data;
+  assert.equal((await h.request('price', { id: id(1), price: '110,45', expectedPrice: 10000 })).status, 200);
+  assert.deepEqual(h.mutations, [{ productId: 'gid://shopify/Product/9', variants: [{ id: id(1), price: '110.45' }] }]);
+  assert.equal(h.costMutations.length, 0);
+  assert.equal(variants[0].compareAtPrice, '150.00');
+  assert.equal(variants[0].inventoryItem.unitCost.amount, '60.00');
+  assert.equal(variants[1].price, '100.00');
+  const state = (await h.request('state')).data;
+  assert.equal(state.products[0].price, 11045);
+  assert.equal(state.products[0].result.final, 11600);
+  assert.equal(state.audit[0].kind, 'price');
+  assert.equal(state.audit[0].status, 'success');
+  assert.match(state.audit[0].detail, /Χειροκίνητη/);
+  assert.equal((await h.request('apply', { id: oldPlan.id })).status, 409);
+});
+test('manual price rejects stale prices, invalid amounts, compare-at conflicts and missing CSRF', async t => {
+  const variants = [variant(1)], h = await harness(t, variants); await h.setup();
+  for (const price of ['0', '-1', '1.234', '']) assert.equal((await h.request('price', { id: id(1), price, expectedPrice: 10000 })).status, 400);
+  assert.equal((await h.request('price', { id: id(1), price: '90', expectedPrice: 10000 }, { 'X-CSRF-Token': '' })).status, 403);
+  assert.equal((await h.request('price', { id: id(1), price: '90', expectedPrice: 9000 })).status, 409);
+  variants[0].compareAtPrice = '110';
+  assert.equal((await h.request('price', { id: id(1), price: '110', expectedPrice: 10000 })).status, 400);
+  variants[0].price = '95';
+  assert.equal((await h.request('price', { id: id(1), price: '90', expectedPrice: 10000 })).status, 409);
+  assert.equal(h.mutations.length, 0);
+});
+test('manual price remains usable without a purchase cost and unchanged prices do not write', async t => {
+  const h = await harness(t, [variant(1, '100.00', null)]); await h.setup();
+  const same = await h.request('price', { id: id(1), price: '100', expectedPrice: 10000 });
+  assert.equal(same.data.unchanged, true); assert.equal(h.mutations.length, 0);
+  assert.equal((await h.request('price', { id: id(1), price: '89.40', expectedPrice: 10000 })).status, 200);
+  assert.equal((await h.request('state')).data.products[0].price, 8940);
+});
+test('uncertain manual price writes preserve cached price and log uncertainty', async t => {
+  const h = await harness(t); await h.setup(); h.setMutationError();
+  const response = await h.request('price', { id: id(1), price: '90', expectedPrice: 10000 });
+  assert.equal(response.status, 400); assert.match(response.data.error, /αβέβαιο/);
+  const state = (await h.request('state')).data;
+  assert.equal(state.products[0].price, 10000);
+  assert.equal(state.audit[0].status, 'uncertain');
+  assert.equal(state.job.priceSaving, false);
+});
