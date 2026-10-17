@@ -5,3 +5,15 @@
 .conditions-panel{margin:24px 0;padding:20px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.conditions-panel .section-head{margin-bottom:10px}.conditions-panel h3{margin:0}.condition-row{border:1px solid var(--line);border-radius:8px;padding:16px;margin:16px 0;min-width:0}.condition-row legend{padding:0 6px;font-weight:600}.condition-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.condition-grid label{min-width:0}.condition-grid input,.condition-grid select{width:100%}.condition-collection{grid-column:1/-1}.condition-row button{margin-top:10px}#example-collections{min-height:90px}.condition-summary{font-size:12px;line-height:1.7;padding-left:18px}@media(max-width:450px){.condition-grid{grid-template-columns:1fr}.condition-collection{grid-column:auto}}
 
 .new-price.price-up{color:#167044}.new-price.price-down{color:#b42318}.product-cell{display:flex;align-items:center;gap:10px}.product-cell>div{min-width:0}.product-thumbnail,.product-thumbnail-empty{display:flex;align-items:center;justify-content:center;width:32px;height:32px;flex:0 0 32px;border:1px solid var(--line);border-radius:4px;background:#fff;padding:0;overflow:hidden}.product-thumbnail{cursor:zoom-in}.product-thumbnail img{display:block;width:100%;height:100%;object-fit:contain}.product-thumbnail-empty{color:var(--muted);background:transparent}#image-dialog{width:min(940px,94vw);padding:20px}#image-dialog .section-head{margin-bottom:15px}#image-title{font-size:18px}#product-image{display:block;max-width:100%;max-height:70vh;width:auto;height:auto;object-fit:contain;margin:auto}
+
+.settings-subtabs { display:flex; gap:8px; padding:0 0 24px; }
+.settings-subtabs .active { background:var(--ink,#172b29); color:white; }
+.shipping-adjustments { margin:20px 0; }
+.shipping-adjustments .toolbar { margin-bottom:10px; }
+#shipping-rows td:last-child { min-width:260px; max-width:340px; }
+#shipping-rows td:nth-child(2), #shipping-rows td:nth-child(3) { min-width:180px; max-width:280px; }
+#shipment-dialog { max-width:680px; }
+#shipping-preview-dialog { width:min(960px,95vw); }
+
+#shipping .price-up, #shipping-preview-dialog .price-up { color:#167044; font-weight:600; }
+#shipping .price-down, #shipping-preview-dialog .price-down { color:#b42318; font-weight:600; }

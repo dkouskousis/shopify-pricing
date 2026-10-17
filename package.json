@@ -1,8 +1,8 @@
 {
   "name": "shopify-pricing",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "private": true,
   "type": "module",
   "engines": { "node": ">=24 <25" },
-  "scripts": { "start": "node server.mjs", "test": "node --test", "check": "node --check server.mjs && node --check public/app.js" }
+  "scripts": { "start": "node server.mjs", "test": "node --test", "check": "node --check server.mjs && node --check public/app.js && node --check shipping.mjs && node --check shipping-service.mjs && node --check dhl.mjs && node --check public/shipping-ui.mjs" }
 }

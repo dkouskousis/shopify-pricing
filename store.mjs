@@ -91,8 +91,20 @@ export function openStore(path, encryptionKey) {
   if (db.prepare('PRAGMA user_version').get().user_version < 10) {
     db.exec('BEGIN; DELETE FROM previews; PRAGMA user_version=10; COMMIT');
   }
+  if (db.prepare('PRAGMA user_version').get().user_version < 11) {
+    db.exec(`BEGIN;
+      ALTER TABLE audit ADD COLUMN sku TEXT NOT NULL DEFAULT '';
+      UPDATE audit SET sku=COALESCE((SELECT json_extract(data,'$.sku') FROM variants WHERE variants.id=audit.variant_id),'');
+      PRAGMA user_version=11; COMMIT;`);
+  }
+  // Keep exactly the latest 2,000 attempts, including shipping changes.
+  db.exec(`DELETE FROM audit WHERE id NOT IN (SELECT id FROM audit ORDER BY id DESC LIMIT 2000);
+    CREATE TRIGGER IF NOT EXISTS audit_sku_and_retention AFTER INSERT ON audit BEGIN
+      UPDATE audit SET sku=COALESCE((SELECT json_extract(data,'$.sku') FROM variants WHERE variants.id=NEW.variant_id),'') WHERE id=NEW.id AND NEW.sku='';
+      DELETE FROM audit WHERE id NOT IN (SELECT id FROM audit ORDER BY id DESC LIMIT 2000);
+    END;`);
   // Interrupted writes may have reached Shopify. Never automatically repeat them.
-  db.prepare("UPDATE audit SET status='uncertain',detail='Η εφαρμογή επανεκκινήθηκε κατά την ενημέρωση. Συγχρόνισε και έλεγξε την τιμή ή το κόστος.' WHERE status='pending'").run();
+  db.prepare("UPDATE audit SET status='uncertain',detail='Η εφαρμογή επανεκκινήθηκε κατά την ενημέρωση. Συγχρόνισε και έλεγξε τιμή, κόστος ή μεταφορικά.' WHERE status='pending'").run();
   const key = Buffer.from(encryptionKey, 'hex');
   function encrypt(value) {
     const iv = randomBytes(12), cipher = createCipheriv('aes-256-gcm', key, iv);

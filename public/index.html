@@ -15,7 +15,7 @@
   <div id="workspace" hidden>
     <header><div><span class="eyebrow">SHOPIFY PRICING</span><h1>Πίνακας τιμολόγησης</h1><p id="shop-label" class="muted"></p></div><button id="logout" class="quiet">Αποσύνδεση</button></header>
     <nav aria-label="Κύριες ενότητες">
-      <button data-tab="products" class="active">Προϊόντα</button><button data-tab="rules">Κανόνες προμηθευτών</button><button data-tab="settings">Ρυθμίσεις API</button><button data-tab="history">Ιστορικό</button>
+      <button data-tab="products" class="active">Προϊόντα</button><button data-tab="rules">Κανόνες προμηθευτών</button><button data-tab="shipping">Μεταφορικά</button><button data-tab="settings">Ρυθμίσεις</button><button data-tab="history">Ιστορικό</button>
     </nav>
     <main>
       <div id="job" class="banner" role="status" hidden></div>
@@ -58,22 +58,54 @@
           <div class="actions"><button>Αποθήκευση κανόνα</button><button type="button" id="reset-rule" class="quiet">Νέος κανόνας</button></div>
         </form></div><div class="panel"><h3>Αποθηκευμένοι κανόνες</h3><div id="rule-list"></div><h3 class="spaced">Προμηθευτές χωρίς κανόνα</h3><div id="unconfigured"></div></div></div>
       </section>
+      <section id="shipping" class="tab" hidden>
+        <div class="section-head"><div><h2>Μεταφορικά</h2><p id="shipping-sync-time" class="muted">Φόρτωσε τις ζώνες και τις κλίμακες από το Shopify.</p></div><button id="shipping-sync">Συγχρονισμός μεταφορικών</button></div>
+        <p class="footnote">Διαχείριση χρεώσεων στα merchant-owned Shipping profiles. Οι αυτόματες χρεώσεις μεταφορέων εμφανίζονται μόνο για ενημέρωση. Ρυθμίσεις που έχουν μεταφερθεί αποκλειστικά στα Markets χρειάζονται διαχείριση στο Shopify.</p>
+        <div class="toolbar"><label>Προφίλ<select id="shipping-profile"><option value="">Όλα</option></select></label><label>Ζώνη<select id="shipping-zone"><option value="">Όλες</option></select></label><label>Αναζήτηση<input id="shipping-search" type="search" placeholder="Υπηρεσία, χώρα ή ζώνη"></label><label class="check"><input id="shipping-include-free" type="checkbox">Συμπερίληψη δωρεάν χρεώσεων</label></div>
+        <div class="panel shipping-adjustments"><h3>Μαζική προσαρμογή επιλεγμένων κλιμάκων</h3><div class="toolbar">
+          <label>Βάση υπολογισμού<select id="shipping-base"><option value="current">Τωρινή χρέωση Shopify</option><option value="dhl">Πρόσφατη προσφορά DHL</option></select></label>
+          <label>Υπηρεσία DHL<select id="shipping-service"><option value="">Επίλεξε μετά τη λήψη προσφοράς</option></select></label>
+          <label>Προσαρμογή<select id="shipping-kind"><option value="fixed">Σταθερό ποσό (€)</option><option value="percent">Ποσοστό (%)</option></select></label>
+          <label>Τιμή (+ / −)<input id="shipping-value" inputmode="decimal" value="0" placeholder="π.χ. 2 ή -10"></label></div>
+          <p class="footnote">Παραδείγματα: σταθερό ποσό 2 → +2€ σε κάθε κλίμακα· ποσοστό -10 → μείωση 10%. Στη βάση DHL, 0 κρατά την τιμή της υπηρεσίας. Δεν προστίθεται αυτόματα ΦΠΑ ή στρογγυλοποίηση προϊόντων.</p>
+          <div class="selection"><span id="shipping-selection-count">0 επιλεγμένες</span><div><button id="shipping-select" class="quiet">Επιλογή φιλτραρισμένων</button><button id="shipping-clear" class="quiet">Καθαρισμός</button><button id="shipping-quotes" class="quiet">Λήψη DHL για επιλεγμένες</button><button id="shipping-preview">Προεπισκόπηση αλλαγών</button></div></div>
+        </div>
+        <p class="footnote">Οι προσφορές αφορούν ένα δέμα με τα στοιχεία δείγματος, δεν αποτελούν ενιαίο τιμοκατάλογο ολόκληρης ζώνης. Ισχύουν στη σύγκριση για 15 λεπτά και χάνονται με επανεκκίνηση. Οι τιμές Test δεν εφαρμόζονται. Έλεγξε ΦΠΑ, καύσιμα, απομακρυσμένες περιοχές και τυχόν πρόσθετα κόστη στη σύμβασή σου.</p>
+        <div class="table-wrap"><table><thead><tr><th>Επιλογή</th><th>Προφίλ / Ζώνη</th><th>Υπηρεσία / Κλίμακα</th><th>Τωρινή τιμή</th><th>Τιμή DHL<br><small>Επιλεγμένη υπηρεσία</small></th><th>Νέα τιμή</th><th>Δείγμα αποστολής / DHL</th></tr></thead><tbody id="shipping-rows"></tbody></table></div>
+        <div class="pagination"><button id="shipping-previous" class="quiet">Προηγούμενη</button><span id="shipping-page"></span><button id="shipping-next" class="quiet">Επόμενη</button></div>
+      </section>
       <section id="settings" class="tab" hidden>
-        <div class="section-head"><div><h2>Σύνδεση Shopify</h2><p class="muted">Τα μυστικά αποθηκεύονται κρυπτογραφημένα στον server.</p></div></div>
-        <div class="split"><div class="panel"><form id="settings-form">
+        <div class="section-head"><div><h2>Ρυθμίσεις</h2><p class="muted">Τα μυστικά αποθηκεύονται κρυπτογραφημένα στον server.</p></div></div>
+        <div class="settings-subtabs"><button class="active" data-settings-tab="integrations">Integrations</button></div>
+        <section id="integrations"><h3>Shopify</h3><div class="split"><div class="panel"><form id="settings-form">
           <label>Domain καταστήματος<input name="shop" required placeholder="example.myshopify.com" autocomplete="off"></label>
           <label>Τρόπος σύνδεσης<select name="mode"><option value="client_credentials">Client ID + Client secret</option><option value="access_token">Υπάρχον Admin API access token</option></select></label>
           <div id="client-fields"><label>Client ID<input name="clientId" autocomplete="off"></label><label>Client secret<input name="clientSecret" type="password" autocomplete="new-password" placeholder="Συμπλήρωσε για αρχική αποθήκευση ή αντικατάσταση"></label></div>
           <div id="token-fields" hidden><label>Admin API access token<input name="accessToken" type="password" autocomplete="new-password" placeholder="Συμπλήρωσε για αρχική αποθήκευση ή αντικατάσταση"></label></div>
           <p id="credentials-state" class="footnote"></p><div class="actions"><button>Αποθήκευση</button><button type="button" id="test-connection" class="quiet">Έλεγχος αποθηκευμένης σύνδεσης</button></div><p id="connection-result" role="status"></p>
-        </form></div><aside class="panel"><h3>Πριν συνδεθείς</h3><ol><li>Δημιούργησε και εγκατέστησε τη δική σου εφαρμογή Shopify.</li><li>Δώσε scopes <code>read_products</code>, <code>read_inventory</code>, <code>write_products</code> και <code>write_inventory</code>, καθώς και πρόσβαση στο κόστος ειδών.</li><li>Για Client credentials, εφαρμογή και κατάστημα πρέπει να ανήκουν στον ίδιο οργανισμό Shopify.</li><li>Αποθήκευσε τα στοιχεία, κάνε έλεγχο και μετά συγχρονισμό.</li></ol><p class="footnote">Τα tokens Client credentials ανανεώνονται αυτόματα πριν λήξουν. Ένα access token που καταχωρείται χειροκίνητα χρειάζεται αντικατάσταση όταν λήξει ή ανακληθεί.</p><p class="footnote">API version: <strong>2026-10</strong>. Υποστηρίζεται βασικό νόμισμα EUR. Η μαζική εφαρμογή ενημερώνει το Price των επιλεγμένων παραλλαγών. Η επεξεργασία αγοράς ενημερώνει μόνο το Cost per item. Δεν αλλάζουν Compare-at price, φορολογικές ρυθμίσεις ή τιμοκατάλογοι Markets.</p></aside></div>
+        </form></div><aside class="panel"><h3>Πριν συνδεθείς</h3><ol><li>Δημιούργησε και εγκατέστησε τη δική σου εφαρμογή Shopify.</li><li>Δώσε scopes <code>read_products</code>, <code>read_inventory</code>, <code>write_products</code> και <code>write_inventory</code>, καθώς και πρόσβαση στο κόστος ειδών.</li><li>Για μεταφορικά, πρόσθεσε <code>read_shipping</code> και <code>write_shipping</code>, ενημέρωσε την εγκατάσταση και βεβαιώσου ότι ο χρήστης έχει δικαίωμα διαχείρισης ρυθμίσεων αποστολής.</li><li>Για Client credentials, εφαρμογή και κατάστημα πρέπει να ανήκουν στον ίδιο οργανισμό Shopify.</li><li>Αποθήκευσε τα στοιχεία, κάνε έλεγχο και μετά συγχρονισμό.</li></ol><p class="footnote">Τα tokens Client credentials ανανεώνονται αυτόματα πριν λήξουν. Ένα access token που καταχωρείται χειροκίνητα χρειάζεται αντικατάσταση όταν λήξει ή ανακληθεί.</p><p class="footnote">API version: <strong>2026-10</strong>. Υποστηρίζεται βασικό νόμισμα EUR. Η μαζική εφαρμογή ενημερώνει το Price των επιλεγμένων παραλλαγών. Η επεξεργασία αγοράς ενημερώνει μόνο το Cost per item. Δεν αλλάζουν Compare-at price, φορολογικές ρυθμίσεις ή τιμοκατάλογοι Markets.</p></aside></div>
+        <h3 class="spaced">DHL Express · MyDHL API</h3><div class="split"><div class="panel"><form id="dhl-form">
+          <label>Περιβάλλον<select name="environment"><option value="test">Test · δοκιμαστικές τιμές</option><option value="live">Production · πραγματικός λογαριασμός</option></select></label>
+          <label>API username<input name="username" required autocomplete="off" maxlength="200"></label>
+          <label>API password<input name="password" type="password" autocomplete="new-password" placeholder="Κενό = διατήρηση αποθηκευμένου"></label>
+          <label>DHL Express account number<input name="accountNumber" required pattern="[0-9]{9}" maxlength="9" inputmode="numeric" placeholder="9 ψηφία"></label>
+          <div class="form-row"><label>Χώρα αποστολέα (ISO)<input name="originCountryCode" required maxlength="2" placeholder="GR"></label><label>ΤΚ αποστολέα<input name="originPostalCode" required maxlength="20"></label></div>
+          <label>Πόλη αποστολέα<input name="originCityName" required maxlength="100"></label>
+          <p id="dhl-state" class="footnote"></p><button>Αποθήκευση DHL</button>
+        </form></div><aside class="panel"><h3>Σύνδεση για προσφορές μεταφορικών</h3><p>Χρειάζεσαι ενεργό λογαριασμό DHL Express και ξεχωριστά credentials για το MyDHL API. Τα στοιχεία σύνδεσης του MyDHL+ δεν είναι API credentials.</p><p>Αποθήκευσε τα στοιχεία εδώ. Στα Μεταφορικά όρισε δείγμα αποστολής και πάτησε «Λήψη DHL» για έλεγχο της σύνδεσης και εμφάνιση διαθέσιμων υπηρεσιών.</p><p class="footnote">Οι κωδικοί αποθηκεύονται κρυπτογραφημένοι. Η σύνδεση ζητά μόνο προσφορές· η καταχώριση νέων χρεώσεων στο Shopify γίνεται από την προεπισκόπηση.</p></aside></div></section>
       </section>
       <section id="history" class="tab" hidden>
-        <div class="section-head"><div><h2>Ιστορικό ενημερώσεων</h2><p class="muted">Οι τελευταίες 200 απόπειρες ενημέρωσης τιμής ή κόστους. Οι επιτυχίες και οι αποτυχίες καταγράφονται ξεχωριστά.</p></div></div>
-        <div class="table-wrap"><table><thead><tr><th>Ημερομηνία</th><th>Ενέργεια</th><th>Προϊόν</th><th>Πριν</th><th>Μετά</th><th>Αποτέλεσμα</th></tr></thead><tbody id="audit-rows"></tbody></table></div>
+        <div class="section-head"><div><h2>Ιστορικό ενημερώσεων</h2><p class="muted">Διατηρούνται οι τελευταίες 2.000 απόπειρες ενημέρωσης τιμής, κόστους ή μεταφορικών. Οι επιτυχίες και οι αποτυχίες καταγράφονται ξεχωριστά.</p></div></div>
+        <div class="table-wrap"><table><thead><tr><th>Ημερομηνία</th><th>Ενέργεια</th><th>Προϊόν / Κλίμακα</th><th>SKU</th><th>Πριν</th><th>Μετά</th><th>Αποτέλεσμα</th></tr></thead><tbody id="audit-rows"></tbody></table></div>
       </section>
-    </main><footer>Shopify Pricing <span>v1.9.0 · Ιδιωτική διαχείριση τιμών</span></footer>
+    </main><footer>Shopify Pricing <span>v1.10.0 · Ιδιωτική διαχείριση τιμών</span></footer>
   </div>
+  <dialog id="shipment-dialog" aria-labelledby="shipment-title"><div class="section-head"><h2 id="shipment-title">Δείγμα αποστολής DHL</h2><button id="shipment-close" class="quiet">Κλείσιμο</button></div><p id="shipment-row-label" class="muted"></p><form id="shipment-form">
+    <div class="form-row"><label>Χώρα παραλήπτη (ISO)<input name="destinationCountryCode" required maxlength="2" placeholder="DE"></label><label>ΤΚ παραλήπτη<input name="destinationPostalCode" required maxlength="20"></label></div><label>Πόλη παραλήπτη<input name="destinationCityName" required maxlength="100"></label>
+    <div class="form-row"><label>Ημερομηνία αποστολής<input name="plannedShippingDate" type="date" required></label><label>Βάρος με συσκευασία (kg)<input name="weight" inputmode="decimal" required></label></div>
+    <div class="form-row"><label>Μήκος (cm)<input name="length" inputmode="decimal" required></label><label>Πλάτος (cm)<input name="width" inputmode="decimal" required></label><label>Ύψος (cm)<input name="height" inputmode="decimal" required></label></div>
+    <label class="check"><input name="isCustomsDeclarable" type="checkbox">Απαιτείται τελωνειακή δήλωση</label><p class="footnote">Συμπλήρωσε πραγματικό αντιπροσωπευτικό δέμα αυτής της κλίμακας. Η προσφορά μπορεί να διαφέρει για άλλον ΤΚ, βάρος ή διαστάσεις της ίδιας ζώνης.</p><button>Αποθήκευση δείγματος</button></form></dialog>
+  <dialog id="shipping-preview-dialog"><div class="section-head"><h2>Αλλαγές μεταφορικών</h2><button id="shipping-preview-close" class="quiet">Κλείσιμο</button></div><p>Θα ενημερωθούν μόνο οι ακόλουθες χρεώσεις. Η προεπισκόπηση ισχύει 15 λεπτά. Οι όροι και τα όρια κάθε κλίμακας διατηρούνται.</p><div class="table-wrap"><table><thead><tr><th>Κλίμακα</th><th>Πριν</th><th>Μετά</th><th>Διαφορά</th></tr></thead><tbody id="shipping-preview-rows"></tbody></table></div><p class="footnote">Απόφυγε παράλληλες αλλαγές ρυθμίσεων αποστολής. Ο έλεγχος και η αποθήκευση στο Shopify δεν είναι μία αδιαίρετη πράξη.</p><button id="shipping-apply">Εφαρμογή στο Shopify</button></dialog>
   <dialog id="image-dialog" aria-labelledby="image-title"><div class="section-head"><h2 id="image-title"></h2><button id="close-image" type="button" class="quiet">Κλείσιμο</button></div><img id="product-image" alt="" referrerpolicy="no-referrer"></dialog>
   <dialog id="price-dialog" aria-labelledby="price-title">
     <div class="section-head"><div><span class="eyebrow">ΤΙΜΗ ΠΩΛΗΣΗΣ</span><h2 id="price-title">Επεξεργασία τελικής τιμής</h2></div><button id="close-price" class="quiet">Κλείσιμο</button></div>

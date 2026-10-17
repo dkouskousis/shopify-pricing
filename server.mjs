@@ -3,6 +3,7 @@ import { randomBytes, scryptSync, timingSafeEqual, createHash, createHmac } from
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
+import { createShippingService } from './shipping-service.mjs';
 import { openStore } from './store.mjs';
 import { decimal, money, validateRule, calculate } from './pricing.mjs';
 import { QUERIES, validateSettings, createShopify, collectionPages, productCollectionIds } from './shopify.mjs';
@@ -59,8 +60,8 @@ export function createApplication(config, dependencies = {}) {
   function invalidate() { db.exec('DELETE FROM previews'); }
   function safeError(error) {
     let message = String(error.message || 'Παρουσιάστηκε σφάλμα.');
-    const s = store.settings();
-    for (const secret of [s?.clientSecret, s?.accessToken, config.password]) if (secret) message = message.replaceAll(secret, '[hidden]');
+    const s = store.settings(), d = store.get('dhlSettings') ? store.decrypt(store.get('dhlSettings')) : null;
+    for (const secret of [s?.clientSecret, s?.accessToken, d?.password, d?.username, d?.accountNumber, config.password]) if (secret) message = message.replaceAll(secret, '[hidden]');
     return message.slice(0, 1000);
   }
   function startJob(type, work) {
@@ -148,6 +149,7 @@ export function createApplication(config, dependencies = {}) {
     job.message = `${success} ενημερώσεις ολοκληρώθηκαν, ${failed} χρειάζονται έλεγχο.${shuttingDown ? ' Η εργασία σταμάτησε λόγω επανεκκίνησης.' : ''} Δες το ιστορικό.`;
   }
 
+  const shipping = createShippingService({ store, graphql, startJob, jobState: () => job, safeError, stopping: () => shuttingDown, makeDhl: dependencies.makeDhl });
   const server = http.createServer(async (req, res) => {
     const headers = {
       'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer',
@@ -186,12 +188,16 @@ export function createApplication(config, dependencies = {}) {
           const s = store.settings();
           return json({ csrf: session.csrf, job: { ...job, costSaving, priceSaving }, lastSync: store.get('lastSync'), shopInfo: store.get('shopInfo'),
             settings: s ? { shop: s.shop, mode: s.mode, clientId: s.clientId, hasClientSecret: Boolean(s.clientSecret), hasAccessToken: Boolean(s.accessToken) } : null,
-            rules: store.rules(), collections: store.get('collections'), vendors: [...new Set(store.variants().map(v => v.vendor))].sort(),
-            products: store.variants().map(resultFor), audit: db.prepare('SELECT * FROM audit ORDER BY id DESC LIMIT 200').all() });
+            shipping: shipping.state(), rules: store.rules(), collections: store.get('collections'), vendors: [...new Set(store.variants().map(v => v.vendor))].sort(),
+            products: store.variants().map(resultFor), audit: db.prepare('SELECT * FROM audit ORDER BY id DESC LIMIT 2000').all() });
         }
         if (req.method !== 'POST') fail('Δεν βρέθηκε.', 404);
         const input = await body(req);
         if (job.running || costSaving || priceSaving || shuttingDown) fail('Περίμενε να ολοκληρωθεί η τρέχουσα εργασία.', 409);
+        if (url.pathname.startsWith('/api/shipping/') || url.pathname === '/api/dhl/settings') {
+          priceSaving = true;
+          try { return json(await shipping.handle(url.pathname, input)); } finally { priceSaving = false; }
+        }
         if (url.pathname === '/api/settings') {
           store.saveSettings(validateSettings(input, store.settings() ?? {})); client = null; invalidate(); return json({ ok: true });
         }
@@ -304,7 +310,7 @@ export function createApplication(config, dependencies = {}) {
         }
         fail('Δεν βρέθηκε.', 404);
       }
-      const paths = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/product-filters.mjs': ['product-filters.mjs', 'text/javascript'], '/pricing.mjs': ['pricing.mjs', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
+      const paths = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/shipping-ui.mjs': ['shipping-ui.mjs', 'text/javascript'], '/product-filters.mjs': ['product-filters.mjs', 'text/javascript'], '/pricing.mjs': ['pricing.mjs', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
       if (req.method === 'GET' && paths[url.pathname]) {
         const [file, type] = paths[url.pathname];
         res.writeHead(200, { ...headers, 'Content-Type': `${type}; charset=utf-8` });
