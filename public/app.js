@@ -125,7 +125,7 @@ $('#previous').addEventListener('click', () => { page--; renderProducts(); });
 $('#next').addEventListener('click', () => { page++; renderProducts(); });
 $('#product-rows').addEventListener('change', event => {
   const id = event.target.dataset.select; if (!id) return;
-  if (event.target.checked && selected.size >= 100) { event.target.checked = false; return notify('Μέχρι 100 παραλλαγές ανά εφαρμογή.', true); }
+  if (event.target.checked && selected.size >= 2000) { event.target.checked = false; return notify('Μέχρι 2.000 παραλλαγές ανά εφαρμογή.', true); }
   event.target.checked ? selected.add(id) : selected.delete(id); renderProducts();
 });
 $('#product-rows').addEventListener('click', event => {
@@ -184,11 +184,11 @@ $('#cost-form').addEventListener('submit', event => {
 $('#select-page').addEventListener('change', event => {
   const check = event.target.checked;
   for (const p of filtered().slice(page * 50, page * 50 + 50).filter(eligible)) {
-    if (check && selected.size < 100) selected.add(p.id); else if (!check) selected.delete(p.id);
+    if (!check) selected.delete(p.id); else if (selected.size < 2000) selected.add(p.id);
   }
   renderProducts();
 });
-$('#select-filtered').addEventListener('click', () => { selected = new Set(filtered().filter(eligible).slice(0, 100).map(p => p.id)); renderProducts(); });
+$('#select-filtered').addEventListener('click', () => { selected = new Set(filtered().filter(eligible).slice(0, 2000).map(p => p.id)); renderProducts(); });
 $('#clear-selection').addEventListener('click', () => { selected.clear(); renderProducts(); });
 $('#sync').addEventListener('click', event => action(event.currentTarget, async () => { await api('sync', {}); await load(); }));
 $('#preview').addEventListener('click', event => action(event.currentTarget, async () => {

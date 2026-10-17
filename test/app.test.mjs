@@ -408,3 +408,22 @@ test('five-cent endings are identical in state, preview and automatic Shopify wr
   await h.request('price', { id: id(1), price: '20.00', expectedPrice: 1995 });
   assert.equal(h.mutations[1].variants[0].price, '20.00');
 });
+
+test('2000 selected variants apply successfully as individual Shopify writes; selection is capped at 2000', async t => {
+  const variants = Array.from({ length: 2001 }, (_, i) => variant(i + 1));
+  const h = await harness(t, variants); await h.setup();
+  const ids = variants.slice(0, 2000).map(v => v.id);
+  const plan = await h.request('preview', { ids });
+  assert.equal(plan.status, 200); assert.equal(plan.data.items.length, 2000);
+  assert.equal((await h.request('preview', { ids: variants.slice(0, 2000).map(v => v.id) })).status, 200);
+  assert.equal((await h.request('preview', { ids: Array.from({ length: 2001 }, (_, i) => id(i + 1)) })).status, 400);
+  assert.equal((await h.request('preview', { ids: [id(2), id(2)] })).status, 400);
+  assert.equal((await h.request('apply', { id: plan.data.id })).status, 202);
+  const state = await h.idle();
+  assert.equal(state.job.total, 2000); assert.equal(state.job.completed, 2000);
+  assert.equal(h.app.store.db.prepare("SELECT count(*) AS n FROM audit WHERE status='success'").get().n, 2000);
+  assert.equal(h.mutations.length, 2000);
+  assert.ok(h.mutations.every(m => m.variants.length === 1));
+  assert.ok(variants.slice(0, 2000).every(v => v.price === '116.00'));
+  assert.ok(variants.slice(2000).every(v => v.price === '100.00'));
+});

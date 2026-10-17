@@ -282,7 +282,7 @@ export function createApplication(config, dependencies = {}) {
         }
         if (url.pathname === '/api/sync') { startJob('sync', sync); return json({ ok: true }, 202); }
         if (url.pathname === '/api/preview') {
-          if (!Array.isArray(input.ids) || !input.ids.length || input.ids.length > 100 || new Set(input.ids).size !== input.ids.length) fail('Επίλεξε 1–100 διαφορετικές παραλλαγές.');
+          if (!Array.isArray(input.ids) || !input.ids.length || input.ids.length > 2000 || new Set(input.ids).size !== input.ids.length) fail('Επίλεξε 1–2.000 διαφορετικές παραλλαγές.');
           const items = input.ids.map(id => {
             const v = store.variant(id); if (!v) fail('Δεν βρέθηκε η παραλλαγή.');
             const { result } = resultFor(v); if (result.error) fail(`${v.title}: ${result.error}`);
