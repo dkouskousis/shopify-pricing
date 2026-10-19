@@ -1,6 +1,6 @@
 {
   "name": "shopify-pricing",
-  "version": "1.14.1",
+  "version": "1.15.0",
   "private": true,
   "type": "module",
   "engines": { "node": ">=24 <25" },

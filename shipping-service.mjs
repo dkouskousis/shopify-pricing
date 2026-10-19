@@ -2,10 +2,11 @@ import { decimal } from './pricing.mjs';
 import { directoryState, editDestination, countryList, refreshDestination } from './postal-directory.mjs';
 import { sampleDefaults } from './public/shipping-sample.mjs';
 import { randomBytes } from 'node:crypto';
-import { shippingRates, shippingFingerprint, shippingUpdate, adjustedShippingPrice, SHIPPING_QUERIES } from './shipping.mjs';
+import { SHIPPING_API_VERSION, shippingRates, shippingFingerprint, shippingUpdate, adjustedShippingPrice, SHIPPING_QUERIES } from './shipping.mjs';
 import { validateDhlSettings, validateShipment, createDhl } from './dhl.mjs';
 const token = () => randomBytes(32).toString('hex');
 export function createShippingService({ store, graphql, startJob, jobState, safeError, stopping, makeDhl = createDhl, postalFetch = fetch }) {
+  const shippingGraphql = () => (query, variables) => graphql()(query, variables, SHIPPING_API_VERSION);
   const { db } = store, quotes = new Map(), plans = new Map();
   const dhlSettings = () => { const value = store.get('dhlSettings'); return value ? store.decrypt(value) : null; };
   dhlSettings();
@@ -15,11 +16,12 @@ export function createShippingService({ store, graphql, startJob, jobState, safe
     for (const [id, q] of quotes) if (Date.now() - Date.parse(q.at) > 15 * 60000) quotes.delete(id);
     for (const [id, p] of plans) if (p.expires < Date.now()) plans.delete(id);
     return { directory: directoryState(store), dhl: d ? { ...safe, hasPassword: Boolean(password) } : null, lastSync: store.get('shippingSync'),
-      rows: (store.get('shippingRates') ?? []).map(r => ({ ...r, fingerprint: shippingFingerprint(r), sample: samples[r.id] ?? null, quote: quotes.get(r.id) ?? null })) };
+      needsSync: (store.get('shippingRates') ?? []).some(r => !r.rateGroupId),
+      rows: (store.get('shippingRates') ?? []).map(r => ({ ...r, editable: r.editable && Boolean(r.rateGroupId), fingerprint: shippingFingerprint(r), sample: samples[r.id] ?? null, quote: quotes.get(r.id) ?? null })) };
   }
   const cachedRow = id => { const r = (store.get('shippingRates') ?? []).find(r => r.id === id); if (!r) throw new Error('Δεν βρέθηκε η κλίμακα. Κάνε συγχρονισμό μεταφορικών.'); return r; };
   async function freshRow(row) {
-    return (await shippingRates(graphql(), { id: row.profileId, name: row.profileName, profileLocationGroups: [{ locationGroup: { id: row.groupId } }] })).find(r => r.id === row.id);
+    return (await shippingRates(shippingGraphql(), { id: row.profileId, name: row.profileName, profileLocationGroups: [{ locationGroup: { id: row.groupId } }] })).find(r => r.id === row.id);
   }
   async function updatePrice(item) {
     const audit = db.prepare('INSERT INTO audit(created,variant_id,title,old_price,new_price,status,detail,kind) VALUES (?,?,?,?,?,?,?,?)')
@@ -29,7 +31,7 @@ export function createShippingService({ store, graphql, startJob, jobState, safe
       const fresh = await freshRow(item.row);
       if (!fresh || !fresh.editable || shippingFingerprint(fresh) !== item.fingerprint) throw new Error('Η κλίμακα άλλαξε στο Shopify. Συγχρόνισε ξανά πριν την ενημέρωση.');
       sending = true;
-      const payload = (await graphql()(SHIPPING_QUERIES.update, shippingUpdate(fresh, item.newPrice))).deliveryProfileUpdate;
+      const payload = (await shippingGraphql()(SHIPPING_QUERIES.update, shippingUpdate(fresh, item.newPrice))).deliveryProfileUpdate;
       if (payload.userErrors.length) { sending = false; throw new Error(payload.userErrors.map(e => e.message).join('; ')); }
       const confirmed = await freshRow(fresh);
       if (!confirmed || confirmed.price !== item.newPrice || shippingFingerprint({ ...confirmed, price: fresh.price }) !== item.fingerprint) throw new Error('Δεν επιβεβαιώθηκε η αποθήκευση χωρίς αλλαγή όρων. Συγχρόνισε και έλεγξε το Shopify.');
@@ -103,7 +105,14 @@ export function createShippingService({ store, graphql, startJob, jobState, safe
     }
     if (path === '/api/shipping/sync') {
       startJob('shipping-sync', async () => {
-        const rows = await shippingRates(graphql());
+        const rows = await shippingRates(shippingGraphql());
+        const previous = store.get('shippingRates') ?? [], samples = { ...(store.get('shippingSamples') ?? {}) };
+        const oldSamples = new Map(previous.filter(r => r.providerId && samples[r.id]).map(r => [JSON.stringify([r.profileId,r.groupId,r.zoneId,r.providerId]), samples[r.id]]));
+        for (const row of rows) {
+          const sample = oldSamples.get(JSON.stringify([row.profileId,row.groupId,row.zoneId,row.providerId]));
+          if (row.providerId && !samples[row.id] && sample) samples[row.id] = sample;
+        }
+        if (Object.keys(samples).length) store.put('shippingSamples', samples);
         store.put('shippingRates', rows); store.put('shippingSync', new Date().toISOString()); quotes.clear(); plans.clear();
         jobState().message = `Συγχρονίστηκαν ${rows.length} κλίμακες μεταφορικών.`;
       }); return { ok: true };
@@ -151,7 +160,7 @@ export function createShippingService({ store, graphql, startJob, jobState, safe
     }
     if (path === '/api/shipping/price') {
       const row = cachedRow(input.id), newPrice = decimal(input.price, 'Τιμή μεταφορικών');
-      if (!row.editable) throw new Error('Υποστηρίζονται μόνο σταθερές χρεώσεις EUR.');
+      if (!row.editable || !row.rateGroupId) throw new Error('Υποστηρίζονται μόνο σταθερές χρεώσεις EUR.');
       const fingerprint = shippingFingerprint(row);
       if (input.expectedFingerprint !== fingerprint) throw Object.assign(new Error('Η κλίμακα άλλαξε. Ανανέωσε τη λίστα και δοκίμασε ξανά.'), { status: 409 });
       if (row.price === newPrice) {
@@ -168,7 +177,7 @@ export function createShippingService({ store, graphql, startJob, jobState, safe
       if (!Array.isArray(input.ids) || input.ids.length < 1 || input.ids.length > 2000 || new Set(input.ids).size !== input.ids.length) throw new Error('Επίλεξε 1–2.000 διαφορετικές κλίμακες.');
       if (!['current','dhl'].includes(input.base)) throw new Error('Επίλεξε βάση υπολογισμού.');
       const items = input.ids.map(id => {
-        const row = cachedRow(id); if (!row.editable) throw new Error('Υποστηρίζονται μόνο σταθερές χρεώσεις EUR.');
+        const row = cachedRow(id); if (!row.editable || !row.rateGroupId) throw new Error('Υποστηρίζονται μόνο σταθερές χρεώσεις EUR.');
         if (row.price === 0 && !input.includeFree) throw new Error('Η επιλογή περιέχει δωρεάν χρέωση. Ενεργοποίησε τη σχετική επιλογή ή αφαίρεσέ την.');
         let base = row.price;
         if (input.base === 'dhl') {

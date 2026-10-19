@@ -95,9 +95,10 @@ export function createShopify(settings, fetcher = fetch) {
     expiresAt = Date.now() + (result.expires_in - 120) * 1000;
     return token;
   }
-  return async function graphql(query, variables = {}) {
+  return async function graphql(query, variables = {}, version = '2026-10') {
+    if (!['2026-10', 'unstable'].includes(version)) throw new Error('Μη υποστηριζόμενη έκδοση Shopify API.');
     if (nextRequestAt > Date.now()) await delay(nextRequestAt - Date.now());
-    const response = await fetcher(`https://${settings.shop}/admin/api/2026-10/graphql.json`, {
+    const response = await fetcher(`https://${settings.shop}/admin/api/${version}/graphql.json`, {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(30000),
       headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': await getToken() },
       body: JSON.stringify({ query, variables }),

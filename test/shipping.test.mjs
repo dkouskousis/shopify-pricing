@@ -11,6 +11,14 @@ const country = {name:'Germany',code:{countryCode:'DE',restOfWorld:false}};
 const method = (n,price='10.00',currency='EUR') => ({ id:id('DeliveryMethodDefinition',n), name:'DHL Express '+n, active:true,description:'Express',
   methodConditions:[{id:id('DeliveryCondition',n),field:'TOTAL_WEIGHT',operator:'LESS_THAN_OR_EQUAL_TO',conditionCriteria:{value:2,unit:'KILOGRAMS'}}],
   rateProvider:{__typename:'DeliveryRateDefinition',id:id('DeliveryRateDefinition',n),price:{amount:price,currencyCode:currency}} });
+// Build grouped API responses from the small editable fixtures used by the service tests.
+const providerPage = method => ({ node: { id: method.id, rateGroups: { nodes: [{ id: 'rate-group-' + method.id, rateProviders: {
+  nodes: [{ ...structuredClone(method.rateProvider), minTransitTime: null, maxTransitTime: null,
+    conditions: method.methodConditions.map(c => ({ subject: c.field === 'TOTAL_WEIGHT' ? 'PACKAGE_WEIGHT' : 'TOTAL_CART_VALUE',
+      min: c.operator === 'GREATER_THAN_OR_EQUAL_TO' ? c.conditionCriteria : c.field === 'TOTAL_WEIGHT' ? {value:0,unit:c.conditionCriteria.unit} : {amount:'0',currencyCode:c.conditionCriteria.currencyCode},
+      max: c.operator === 'LESS_THAN_OR_EQUAL_TO' ? c.conditionCriteria : null })) }], pageInfo
+} }], pageInfo } } });
+const metadata = method => ({ id: method.id, name: method.name, active: method.active, description: method.description, currencyCode: method.rateProvider.price?.currencyCode ?? 'EUR', freeConditions: [] });
 const dhl = {environment:'live',username:'my-api-user',password:'my-secret-pass',accountNumber:'123456789',originCountryCode:'GR',originPostalCode:'10557',originCityName:'Athens'};
 const sample = {destinationCountryCode:'DE',destinationPostalCode:'10115',destinationCityName:'Berlin',weight:'2',length:'30',width:'20',height:'10',plannedShippingDate:new Date(Date.now()+86400000).toISOString().slice(0,10),isCustomsDeclarable:false};
 const config={appUrl:'http://localhost',password:'test-password-shipping-only',encryptionKey:'ac'.repeat(32),dbPath:':memory:'};
@@ -19,9 +27,10 @@ async function harness(t) {
   let writes=[],failWrite='',readError=false,quoteError=false,quoteWait=null;
   const api=async(q,v)=>{
     if(q.includes('ShippingProfiles'))return {deliveryProfiles:{nodes:[{id:id('DeliveryProfile',1),name:'General',profileLocationGroups:[{locationGroup:{id:id('DeliveryLocationGroup',1)}}]}],pageInfo}};
-    if(q.includes('ShippingZone')){if(readError)throw new Error('Shipping read failure');return {deliveryProfile:{id:v.id,name:'General',profileLocationGroups:[{locationGroup:{id:v.group},locationGroupZones:{edges:[{cursor:'zone1',node:{zone:{id:id('DeliveryZone',1),name:'EU',countries:[country]},methodDefinitions:{nodes:structuredClone(methods),pageInfo}}}],pageInfo}}]}};}
+    if(q.includes('ShippingProviders')) { if(readError)throw new Error('Shipping read failure'); return providerPage(methods.find(m=>m.id===v.id)); }
+    if(q.includes('ShippingZone')){if(readError)throw new Error('Shipping read failure');return {deliveryProfile:{id:v.id,name:'General',profileLocationGroups:[{locationGroup:{id:v.group},locationGroupZones:{edges:[{cursor:'zone1',node:{zone:{id:id('DeliveryZone',1),name:'EU',countries:[country]},methodDefinitions:{nodes:methods.map(metadata),pageInfo}}}],pageInfo}}]}};}
     if(q.includes('UpdateShippingPrice')){writes.push(structuredClone(v));if(failWrite==='network')throw new Error('Timeout during write');if(failWrite==='denied')return {deliveryProfileUpdate:{profile:null,userErrors:[{message:'Missing write_shipping permission'}]}};
-      const input=v.profile.locationGroupsToUpdate[0].zonesToUpdate[0].methodDefinitionsToUpdate[0];methods.find(m=>m.id===input.id).rateProvider.price.amount=input.rateDefinition.price.amount;
+      const input=v.profile.locationGroupsToUpdate[0].zonesToUpdate[0].methodDefinitionsToUpdate[0];const rate=input.rateGroupsToUpdate[0].rateDefinitionsToUpdate[0];methods.find(m=>m.id===input.id).rateProvider.price.amount=rate.price.amount;
       return {deliveryProfileUpdate:{profile:{id:v.id},userErrors:[]}};
     }
     throw new Error('Unexpected query');
@@ -47,7 +56,7 @@ test('shipping preview applies all selected tiers only, preserves conditions, ve
  const p=await h.request('shipping/preview',{ids,base:'current',kind:'fixed',value:'2'});assert.equal(p.status,200);assert.deepEqual(p.data.items.map(i=>i.newPrice),[1200,2200]);assert.equal(h.writes.length,0);
  assert.equal((await h.request('shipping/apply',{id:p.data.id})).status,200);const state=await h.idle();assert.equal(h.writes.length,2);assert.deepEqual(state.shipping.rows.slice(0,3).map(r=>r.price),[1200,2200,0]);
  assert.equal(state.audit[0].kind,'shipping');assert.equal(state.audit[0].status,'success');assert.equal(state.audit[0].sku,'');
- const input=h.writes[0].profile.locationGroupsToUpdate[0].zonesToUpdate[0].methodDefinitionsToUpdate[0];assert.deepEqual(Object.keys(input),['id','rateDefinition']);assert.equal(input.rateDefinition.price.amount,'12.00');
+ const input=h.writes[0].profile.locationGroupsToUpdate[0].zonesToUpdate[0].methodDefinitionsToUpdate[0];assert.deepEqual(Object.keys(input),['id','rateGroupsToUpdate']);assert.equal(input.rateGroupsToUpdate[0].rateDefinitionsToUpdate[0].price.amount,'12.00');
  assert.equal((await h.request('shipping/apply',{id:p.data.id})).status,400);
  const minus=await h.request('shipping/preview',{ids,base:'current',kind:'percent',value:'-10'});assert.deepEqual(minus.data.items.map(i=>i.newPrice),[1080,1980]);
 });
@@ -90,8 +99,9 @@ test('DHL requests use fixed official endpoint, Basic Auth and billing EUR, neve
 });
 test('shipping pagination follows later profiles, zones and methods, rejecting repeated cursors',async()=>{
  let calls=0;const api=async(q,v)=>{calls++;if(q.includes('ShippingProfiles'))return {deliveryProfiles:{nodes:[{id:id('DeliveryProfile',v.after?2:1),name:'P',profileLocationGroups:[{locationGroup:{id:'group'}}]}],pageInfo:{hasNextPage:!v.after,endCursor:'profile2'}}};
- const zone=v.after?'z2':'z1';return{deliveryProfile:{profileLocationGroups:[{locationGroup:{id:'group'},locationGroupZones:{edges:[{cursor:zone,node:{zone:{id:zone,name:zone,countries:[country]},methodDefinitions:{nodes:[method(v.methodsAfter?2:1)],pageInfo:{hasNextPage:!v.methodsAfter,endCursor:'method2'}}}}],pageInfo:{hasNextPage:!v.after,endCursor:'z2'}}}]}};};
- const rows=await shippingRates(api);assert.equal(rows.length,8);assert.equal(calls,10);
+ if(q.includes('ShippingProviders'))return providerPage(method(Number(v.id.split('/').at(-1))));
+ const zone=v.after?'z2':'z1';return{deliveryProfile:{profileLocationGroups:[{locationGroup:{id:'group'},locationGroupZones:{edges:[{cursor:zone,node:{zone:{id:zone,name:zone,countries:[country]},methodDefinitions:{nodes:[metadata(method(v.methodsAfter?2:1))],pageInfo:{hasNextPage:!v.methodsAfter,endCursor:'method2'}}}}],pageInfo:{hasNextPage:!v.after,endCursor:'z2'}}}]}};};
+ const rows=await shippingRates(api);assert.equal(rows.length,8);assert.equal(calls,18);
  await assert.rejects(shippingRates(async()=>({deliveryProfiles:{nodes:[],pageInfo:{hasNextPage:true,endCursor:'repeated'}}})),/σελιδοποίηση/);
 });
 test('audit retains exactly 2000 records with SKU snapshots independent of later product edits',()=>{
@@ -110,7 +120,7 @@ test('in-flight DHL requests block concurrent Shopify writes and credential edit
  assert.equal((await h.request('dhl/settings',dhl)).status,409);assert.equal((await h.request('shipping/sync',{})).status,409);release();assert.equal((await pending).status,200);
 });
 test('bulk sample autofill saves only selected tiers with their own maximum weight and preserves customs choice',async t=>{
- const h=await harness(t);const rows=structuredClone(h.rows);rows[1].conditions[0].conditionCriteria.value=5;h.app.store.put('shippingRates',rows);
+ const h=await harness(t);const rows=structuredClone(h.rows);rows[1].conditions.find(c=>c.operator==='LESS_THAN_OR_EQUAL_TO').conditionCriteria.value=5;h.app.store.put('shippingRates',rows);
  await h.request('shipping/sample',{id:rows[0].id,sample:{...sample,isCustomsDeclarable:true}});
  const result=await h.request('shipping/samples/autofill',{ids:rows.slice(0,2).map(r=>r.id)});assert.equal(result.status,200);assert.equal(result.data.saved.length,2);assert.deepEqual(result.data.skipped,[]);
  const s=(await h.request('state')).data;assert.equal(s.shipping.rows[0].sample.weight,2);assert.equal(s.shipping.rows[1].sample.weight,5);

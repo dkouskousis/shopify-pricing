@@ -36,7 +36,7 @@ export function shippingUI({ $, api, action, notify, load, euros, escape, date }
       const s = r.sample;
       return `<tr><td><input type="checkbox" data-shipping-select="${escape(r.id)}" aria-label="Επιλογή ${escape(r.zoneName)} ${escape(r.name)}" ${selected.has(r.id)?'checked':''} ${!eligible(r)||busy?'disabled':''}></td>
         <td><strong>${escape(r.zoneName)}</strong><small>${escape(r.profileName)}<br>${escape(r.countries.map(c=>c.name).join(', '))}</small></td>
-        <td><strong>${escape(r.name)}</strong><small>${escape(conditions(r))}<br>${r.active?'Ενεργή':'Ανενεργή'}${r.editable?'': ' · Μόνο ανάγνωση ('+escape(r.currency||'carrier')+')'}</small></td>
+        <td><strong>${escape(r.name)}</strong><small>${escape(conditions(r))}${r.freeConditions?.length && r.type !== 'FreeCondition' ? '<br>Ισχύει και όριο δωρεάν αποστολής' : ''}<br>${r.active?'Ενεργή':'Ανενεργή'}${r.editable?'': ' · Μόνο ανάγνωση ('+escape(r.currency||'carrier')+')'}</small></td>
         <td class="number">${r.currency==='EUR'?euros(r.price): r.price===null?'Αυτόματη χρέωση':escape((r.price/100).toFixed(2)+' '+r.currency)}</td>
         <td class="number">${fresh && service?euros(service.price):'—'}${q?`<small>${q.environment==='test'?'TEST · ':''}${escape(service?.name || 'Επίλεξε υπηρεσία')}<br>${date(q.at)}${!fresh?' · Έληξε':''}${service?.weight?.volumetric != null?'<br>Ογκομετρικό: '+escape(service.weight.volumetric)+' kg':''}</small>`:''}</td>
         <td class="number ${direction?'price-'+direction:''}">${r.editable ? `<button class="quiet cost-button shipping-price-button" data-shipping-price="${escape(r.id)}" aria-label="Αλλαγή τιμής μεταφορικών για ${escape(r.zoneName)} ${escape(r.name)}" ${busy?'disabled':''}>${direction?(direction==='up'?'↑ ':'↓ '):''}${proposed===null?'Ορισμός τιμής':euros(proposed)}</button>` : '—'}</td>
@@ -61,7 +61,7 @@ export function shippingUI({ $, api, action, notify, load, euros, escape, date }
     options('#shipping-zone',new Map(rows.filter(r=>!$('#shipping-profile').value||r.profileId===$('#shipping-profile').value).map(r=>[r.zoneId,r.zoneName])),'Όλες');
     const services = new Map(rows.flatMap(r=>(r.quote?.products??[]).map(p=>[p.code,`${p.code} · ${p.name}`])));
     options('#shipping-service',services,'Επίλεξε υπηρεσία DHL');
-    $('#shipping-sync-time').textContent = state.shipping.lastSync?'Τελευταίος συγχρονισμός: '+date(state.shipping.lastSync):'Δεν έχει γίνει συγχρονισμός μεταφορικών.';
+    $('#shipping-sync-time').textContent = state.shipping.needsSync?'Πάτησε Συγχρονισμός μεταφορικών για τη νέα δομή κλιμάκων.':state.shipping.lastSync?'Τελευταίος συγχρονισμός: '+date(state.shipping.lastSync):'Δεν έχει γίνει συγχρονισμός μεταφορικών.';
     const d=state.shipping.dhl;
     if (!dhlDirty && d) for(const [k,v] of Object.entries(d)) if($('#dhl-form').elements[k]) $('#dhl-form').elements[k].value=v;
     $('#dhl-state').textContent = d?`Αποθηκευμένος κωδικός: ${d.hasPassword?'ναι':'όχι'}. Κενό password διατηρεί τον υπάρχοντα.`:'Δεν έχει ρυθμιστεί η σύνδεση DHL.';
