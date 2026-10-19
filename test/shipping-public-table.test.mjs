@@ -30,7 +30,7 @@ test('HTML locator rejects duplicate or merged target tables and ignores unrelat
 });
 function harness(t) {
  const store=openStore(':memory:','cc'.repeat(32));t.after(()=>store.db.close());
- let page={id:'gid://shopify/Page/1',title:'Shipping & Returns',handle:'shipping-returns-2',body,updatedAt:'2026-10-19T12:00:00Z'},writes=[],fail='',changed=false;
+ let page={id:'gid://shopify/Page/1',title:'Shipping & Returns',handle:'shipping-returns-2',body,updatedAt:'2026-10-19T12:00:00Z'},writes=[],fail='',changed=false,editDuringRates=false;
  const pageApi=async(q,v)=>{
   if(q===PUBLIC_TABLE_QUERIES.find)return{pages:{nodes:[structuredClone(page)],pageInfo:{hasNextPage:false,endCursor:null}}};
   if(q===PUBLIC_TABLE_QUERIES.page){if(fail==='readback'&&writes.length)throw new Error('Readback failed');return{page:structuredClone(page)};}
@@ -38,13 +38,14 @@ function harness(t) {
   throw new Error('Unexpected page query');
  };
  const shippingApi=async(q,v)=>{
+  if(editDuringRates){page.body+='<p>Concurrent page edit</p>';editDuringRates=false;}
   if(q===SHIPPING_QUERIES.zone)return{deliveryProfile:{profileLocationGroups:[{locationGroup:{id:'g'},locationGroupZones:{edges:[{node:{zone:{id:'EU',name:'EU',countries:[]},methodDefinitions:{nodes:[{id:'method-EU',name:'DHL',active:true,currencyCode:'EUR',description:'',freeConditions:[]}],pageInfo:{hasNextPage:false}}}}],pageInfo:{hasNextPage:false}}}]}};
   if(q===SHIPPING_QUERIES.providers)return{node:{id:'method-EU',rateGroups:{nodes:[{id:'rg1',rateProviders:{nodes:[1,5].map((max,i)=>({__typename:'DeliveryRateDefinition',id:'r'+i,price:{amount:String((i?31:17)+(changed?1:0)),currencyCode:'EUR'},minTransitTime:null,maxTransitTime:null,conditions:[{subject:'PACKAGE_WEIGHT',min:{value:i?1.001:0,unit:'KILOGRAMS'},max:{value:max,unit:'KILOGRAMS'}}]})),pageInfo:{hasNextPage:false}}}],pageInfo:{hasNextPage:false}}}};
   throw new Error('Unexpected shipping query');
  };
  const service=createPublicShippingTable({store,graphql:()=>pageApi,shippingGraphql:()=>shippingApi,safeError:e=>e.message});
  const c={layoutSignature:currentTable(body).layoutSignature,cells:[[source('EU'),null],[source('EU'),null]]};
- return {service,store,c,writes,editPage:()=>{page.body+='<p>External edit</p>';},changeRates:()=>{changed=true;},setFailure:v=>{fail=v;},page:()=>page};
+ return {service,store,c,writes,editPage:()=>{page.body+='<p>External edit</p>';},changeRates:()=>{changed=true;},editDuringRates:()=>{editDuringRates=true;},setFailure:v=>{fail=v;},page:()=>page};
 }
 test('preview never writes; publication replaces only mapped amounts and verifies saved page with backup/history',async t=>{
  const h=harness(t);const p=await h.service.handle('/api/shipping/public-table/preview',h.c);assert.equal(h.writes.length,0);assert.equal(p.changed,true);
@@ -71,4 +72,9 @@ test('a missing readback cannot report a successful publication',async t=>{
  const h=harness(t);const preview=await h.service.handle('/api/shipping/public-table/preview',h.c);
  h.setFailure('readback');await assert.rejects(h.service.handle('/api/shipping/public-table/publish',{id:preview.id}));
  assert.equal(h.service.state().lastPublished,null);assert.equal(h.store.get('publicTablePage').table.rows[0][1],'16 €');
+});
+
+test('a concurrent page edit during rate refresh is detected before the publication write',async t=>{
+ const h=harness(t),preview=await h.service.handle('/api/shipping/public-table/preview',h.c);h.editDuringRates();
+ await assert.rejects(h.service.handle('/api/shipping/public-table/publish',{id:preview.id}),/σελίδα άλλαξε/);assert.equal(h.writes.length,0);assert.match(h.page().body,/Concurrent page edit/);
 });

@@ -130,10 +130,10 @@ export function createPublicShippingTable({ store, graphql, shippingGraphql, saf
     if (path.endsWith('/publish')) {
       const plan = plans.get(input.id); plans.delete(input.id);
       if (!plan || plan.expires < Date.now()) throw new Error('Η προεπισκόπηση έληξε ή χρησιμοποιήθηκε. Κάνε νέα προεπισκόπηση.');
+      const fresh = buildPublicTable(await freshRates(plan.config),plan.config,currentTable(plan.page.body));
+      if (fresh.signature !== plan.signature) throw new Error('Οι χρεώσεις Shopify άλλαξαν. Φόρτωσε νέα προεπισκόπηση.');
       const page = (await graphql()(PUBLIC_TABLE_QUERIES.page,{id:plan.page.id})).page;
       if (!page || hash(page)!==hash(plan.page)) throw new Error('Η σελίδα άλλαξε μετά την προεπισκόπηση. Φόρτωσε νέα προεπισκόπηση.');
-      const fresh = buildPublicTable(await freshRates(plan.config),plan.config,currentTable(page.body));
-      if (fresh.signature !== plan.signature) throw new Error('Οι χρεώσεις Shopify άλλαξαν. Φόρτωσε νέα προεπισκόπηση.');
       if (page.body === plan.body) return {ok:true,changed:false};
       store.put('publicTableBackup',{pageId:page.id,body:page.body,at:new Date().toISOString()});
       const audit = store.db.prepare('INSERT INTO audit(created,variant_id,title,old_price,new_price,status,detail,kind) VALUES (?,?,?,?,?,?,?,?)').run(new Date().toISOString(),page.id,page.title,0,0,'pending','Ενημέρωση πίνακα μεταφορικών','shipping_page');
