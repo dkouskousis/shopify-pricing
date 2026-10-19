@@ -86,7 +86,11 @@ export function shippingUI({ $, api, action, notify, load, euros, escape, date }
       $('#shipment-row-label').textContent=`${r.profileName} / ${r.zoneName} / ${r.name} · ${conditions(r)}`;
       form.elements.plannedShippingDate.value=new Date().toISOString().slice(0,10);
       if(r.countries.length===1)form.elements.destinationCountryCode.value=r.countries[0].code.countryCode||'';
-      if(r.sample)for(const[k,v]of Object.entries(r.sample)){if(k==='isCustomsDeclarable')form.elements[k].checked=v;else if(form.elements[k])form.elements[k].value=v;}
+      if(r.sample)for(const[k,v]of Object.entries(r.sample)){
+        // namedItem avoids the native collection.length property masking the parcel length input.
+        const field=form.elements.namedItem(k);
+        if(k==='isCustomsDeclarable')field.checked=v;else field.value=v;
+      }
       $('#shipment-dialog').showModal();
     }
     if(quote)action(quote,async()=>{await api('shipping/quote',{id:quote.dataset.quote});await load();notify('Η DHL επέστρεψε προσφορές. Επίλεξε υπηρεσία για σύγκριση.');});
