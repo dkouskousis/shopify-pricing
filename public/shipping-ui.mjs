@@ -105,6 +105,7 @@ export function shippingUI({ $, api, action, notify, load, euros, escape, date }
       const missing = [];
       if (!values.destinationCountryCode) missing.push('Η ζώνη δεν ορίζει συγκεκριμένη χώρα: επίλεξε χώρα και πόλη.');
       else if (!values.destinationCityName) missing.push('Συμπλήρωσε πόλη για τη συγκεκριμένη χώρα.');
+      if (values.destinationCountryCode && !values.destinationPostalCode) missing.push('Δεν υπάρχει επιβεβαιωμένος ΤΚ για αυτή την πόλη. Συμπλήρωσέ τον.');
       if (!values.weight) missing.push('Η κλίμακα δεν έχει χρησιμοποιήσιμο μέγιστο βάρος: συμπλήρωσε κιλά.');
       $('#shipment-autofill-note').textContent = missing.join(' ');
     } catch (error) { notify(error.message, true); }
