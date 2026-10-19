@@ -92,21 +92,28 @@ export function shippingUI({ $, api, action, notify, load, euros, escape, date }
         const field=form.elements.namedItem(k);
         if(k==='isCustomsDeclarable')field.checked=v;else field.value=v;
       }
-      $('#shipment-dialog').showModal();
+      postalRequired(); $('#shipment-dialog').showModal();
     }
     if(quote)action(quote,async()=>{await api('shipping/quote',{id:quote.dataset.quote});await load();notify('Η DHL επέστρεψε προσφορές. Επίλεξε υπηρεσία για σύγκριση.');});
   });
+  function postalRequired() {
+    const form = $('#shipment-form'), code = form.elements.destinationCountryCode.value.trim().toUpperCase();
+    form.elements.destinationPostalCode.required = !state.shipping.directory?.[code]?.noPostalCode;
+  }
+  $('#shipment-form').elements.destinationCountryCode.addEventListener('input', postalRequired);
   $('#shipment-autofill').addEventListener('click', () => {
     const row = state.shipping.rows.find(r => r.id === sampleId);
     try {
-      const values = sampleDefaults(row, new Date().toISOString().slice(0,10));
+      const values = sampleDefaults(row, new Date().toISOString().slice(0,10), state.shipping.directory);
       const form = $('#shipment-form');
       for (const [key, value] of Object.entries(values)) form.elements.namedItem(key).value = value;
+      postalRequired();
       const missing = [];
       if (!values.destinationCountryCode) missing.push('Η ζώνη δεν ορίζει συγκεκριμένη χώρα: επίλεξε χώρα και πόλη.');
       else if (!values.destinationCityName) missing.push('Συμπλήρωσε πόλη για τη συγκεκριμένη χώρα.');
-      if (values.destinationCountryCode && !values.destinationPostalCode) missing.push('Δεν υπάρχει επιβεβαιωμένος ΤΚ για αυτή την πόλη. Συμπλήρωσέ τον.');
+      if (values.destinationCountryCode && !values.destinationPostalCode && !state.shipping.directory?.[values.destinationCountryCode]?.noPostalCode) missing.push('Δεν υπάρχει επιβεβαιωμένος ΤΚ για αυτή την πόλη. Συμπλήρωσέ τον.');
       if (!values.weight) missing.push('Η κλίμακα δεν έχει χρησιμοποιήσιμο μέγιστο βάρος: συμπλήρωσε κιλά.');
+      if (state.shipping.directory?.[values.destinationCountryCode]?.noPostalCode) missing.push('Η χώρα δεν χρησιμοποιεί ΤΚ. Το πεδίο παραμένει κενό.');
       $('#shipment-autofill-note').textContent = missing.join(' ');
     } catch (error) { notify(error.message, true); }
   });

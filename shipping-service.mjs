@@ -1,9 +1,10 @@
+import { directoryState, editDestination, countryList, refreshDestination } from './postal-directory.mjs';
 import { sampleDefaults } from './public/shipping-sample.mjs';
 import { randomBytes } from 'node:crypto';
 import { shippingRates, shippingFingerprint, shippingUpdate, adjustedShippingPrice, SHIPPING_QUERIES } from './shipping.mjs';
 import { validateDhlSettings, validateShipment, createDhl } from './dhl.mjs';
 const token = () => randomBytes(32).toString('hex');
-export function createShippingService({ store, graphql, startJob, jobState, safeError, stopping, makeDhl = createDhl }) {
+export function createShippingService({ store, graphql, startJob, jobState, safeError, stopping, makeDhl = createDhl, postalFetch = fetch }) {
   const { db } = store, quotes = new Map(), plans = new Map();
   const dhlSettings = () => { const value = store.get('dhlSettings'); return value ? store.decrypt(value) : null; };
   dhlSettings();
@@ -12,7 +13,7 @@ export function createShippingService({ store, graphql, startJob, jobState, safe
     const samples = store.get('shippingSamples') ?? {};
     for (const [id, q] of quotes) if (Date.now() - Date.parse(q.at) > 15 * 60000) quotes.delete(id);
     for (const [id, p] of plans) if (p.expires < Date.now()) plans.delete(id);
-    return { dhl: d ? { ...safe, hasPassword: Boolean(password) } : null, lastSync: store.get('shippingSync'),
+    return { directory: directoryState(store), dhl: d ? { ...safe, hasPassword: Boolean(password) } : null, lastSync: store.get('shippingSync'),
       rows: (store.get('shippingRates') ?? []).map(r => ({ ...r, sample: samples[r.id] ?? null, quote: quotes.get(r.id) ?? null })) };
   }
   const cachedRow = id => { const r = (store.get('shippingRates') ?? []).find(r => r.id === id); if (!r) throw new Error('Δεν βρέθηκε η κλίμακα. Κάνε συγχρονισμό μεταφορικών.'); return r; };
@@ -43,7 +44,8 @@ export function createShippingService({ store, graphql, startJob, jobState, safe
     }
     job.message = `Μεταφορικά: ${success} ενημερώθηκαν, ${failed} χρειάζονται έλεγχο.${stopping() ? ' Η εργασία διακόπηκε λόγω επανεκκίνησης.' : ''}`;
   }
-  function checkSample(row, sample) {
+  function checkSample(row, sample, directory = directoryState(store)) {
+    if (!sample.destinationPostalCode && !directory[sample.destinationCountryCode]?.noPostalCode) throw new Error('Συμπλήρωσε ΤΚ παραλήπτη ή ενημέρωσε τη χώρα στις Ρυθμίσεις → Χώρες & ΤΚ.');
     if (!row.countries.some(c => c.code.restOfWorld || c.code.countryCode === sample.destinationCountryCode)) throw new Error('Η χώρα δείγματος δεν ανήκει στη ζώνη.');
     const kg = { KILOGRAMS: 1, GRAMS: 0.001, POUNDS: 0.45359237, OUNCES: 0.028349523125 };
     for (const condition of row.conditions.filter(c => c.field === 'TOTAL_WEIGHT')) {
@@ -54,6 +56,42 @@ export function createShippingService({ store, graphql, startJob, jobState, safe
     }
   }
   async function handle(path, input) {
+    if (path === '/api/shipping/countries/save') {
+      const directory = directoryState(store);
+      if (typeof input.code !== 'string' || !Object.hasOwn(directory, input.code)) throw new Error('Μη έγκυρη χώρα.');
+      directory[input.code] = editDestination(input, directory[input.code]);
+      store.put('postalDirectory', directory); quotes.clear(); plans.clear(); return { ok: true };
+    }
+    if (path === '/api/shipping/countries/refresh') {
+      if (input.codes !== undefined && (!Array.isArray(input.codes) || !input.codes.length || input.codes.length > 300 || new Set(input.codes).size !== input.codes.length || input.codes.some(c => typeof c !== 'string' || !Object.hasOwn(directoryState(store), c)))) throw new Error('Επίλεξε έγκυρες χώρες.');
+      startJob('postal-refresh', async () => {
+        let directory = directoryState(store), countries;
+        // Refreshing all also discovers countries added after this app release.
+        if (input.codes === undefined) {
+          countries = await countryList(postalFetch);
+          for (const [code, entry] of Object.entries(countries)) {
+            if (!directory[code]) directory[code] = entry;
+            else directory[code] = { ...directory[code], name: entry.name };
+          }
+          store.put('postalDirectory', directory);
+        }
+        const codes = input.codes ?? Object.keys(directory); let success = 0, failed = 0;
+        jobState().total = codes.length;
+        for (let i = 0; i < codes.length && !stopping(); i += 4) {
+          await Promise.all(codes.slice(i, i + 4).map(async code => {
+            const attemptedAt = new Date().toISOString();
+            try {
+              const entry = directory[code], city = !entry.manual && countries?.[code]?.city ? countries[code].city : entry.city;
+              directory[code] = { ...await refreshDestination(code, { ...entry, city }, postalFetch), attemptedAt }; success++;
+            }
+            catch (error) { directory[code] = { ...directory[code], attemptedAt, error: safeError(error) }; failed++; }
+            store.put('postalDirectory', directory); jobState().completed++;
+          }));
+        }
+        quotes.clear(); plans.clear();
+        jobState().message = `Χώρες & ΤΚ: ${success} ενημερώθηκαν, ${failed} χρειάζονται έλεγχο.${stopping() ? ' Η ενημέρωση διακόπηκε λόγω επανεκκίνησης.' : ''}`;
+      }); return { ok: true };
+    }
     if (path === '/api/dhl/settings') {
       const s = validateDhlSettings(input, dhlSettings() ?? {});
       store.put('dhlSettings', store.encrypt(s)); quotes.clear(); plans.clear(); return { ok: true };
@@ -73,14 +111,14 @@ export function createShippingService({ store, graphql, startJob, jobState, safe
         if (!row) throw new Error('Δεν βρέθηκε η κλίμακα. Κάνε συγχρονισμό μεταφορικών.');
         return row;
       });
-      const samples = { ...(store.get('shippingSamples') ?? {}) };
+      const samples = { ...(store.get('shippingSamples') ?? {}) }, directory = directoryState(store);
       const saved = [], skipped = [], today = new Date().toISOString().slice(0,10);
       for (const row of rows) {
         try {
-          const values = sampleDefaults(row, today);
-          if (!values.destinationCountryCode || !values.destinationCityName || !values.destinationPostalCode || !values.weight) throw new Error('Λείπει χώρα, πόλη, επιβεβαιωμένος ΤΚ ή μέγιστο βάρος. Συμπλήρωσε το δείγμα χειροκίνητα.');
+          const values = sampleDefaults(row, today, directory);
+          if (!values.destinationCountryCode || !values.destinationCityName || (!values.destinationPostalCode && !directory[values.destinationCountryCode]?.noPostalCode) || !values.weight) throw new Error('Λείπει χώρα, πόλη, επιβεβαιωμένος ΤΚ ή μέγιστο βάρος. Συμπλήρωσε το δείγμα χειροκίνητα.');
           const sample = validateShipment({ ...values, isCustomsDeclarable: samples[row.id]?.isCustomsDeclarable ?? false });
-          checkSample(row, sample); samples[row.id] = sample; saved.push(row.id);
+          checkSample(row, sample, directory); samples[row.id] = sample; saved.push(row.id);
         } catch (error) {
           skipped.push({ id: row.id, title: `${row.zoneName} / ${row.name}`, error: safeError(error) });
         }

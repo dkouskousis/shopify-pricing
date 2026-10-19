@@ -1,4 +1,5 @@
 import { decimal, validateRule, calculate } from './pricing.mjs';
+import { postalUI } from './postal-ui.mjs';
 import { shippingUI } from './shipping-ui.mjs';
 import { filterProducts } from './product-filters.mjs';
 const $ = selector => document.querySelector(selector);
@@ -108,12 +109,12 @@ async function load() {
   $('#vendor').innerHTML = '<option value="">Όλοι οι προμηθευτές</option>' + state.vendors.map(v => `<option value="${escape(v)}">${escape(v || '(κενό Vendor)')}</option>`).join('');
   $('#vendor').value = state.vendors.includes(vendor) ? vendor : '';
   selected = new Set([...selected].filter(id => state.products.some(p => p.id === id && selectable(p))));
-  renderProducts(); renderRules(); renderSettings(); shipping.render(state); refreshCollectionOptions(); ruleExample();
+  renderProducts(); renderRules(); renderSettings(); shipping.render(state); postal.render(state); refreshCollectionOptions(); ruleExample();
   const labels = { success: 'Επιτυχία', failed: 'Αποτυχία', uncertain: 'Χρειάζεται έλεγχο στο Shopify', pending: 'Σε εξέλιξη' };
   $('#audit-rows').innerHTML = state.audit.length ? state.audit.map(a => `<tr><td>${date(a.created)}</td><td>${a.kind === 'cost' ? 'Κόστος αγοράς' : a.kind === 'shipping' ? 'Μεταφορικά' : 'Τιμή πώλησης'}</td><td>${escape(a.title)}</td><td>${escape(a.sku || '—')}</td><td class="number">${a.old_missing ? '—' : euros(a.old_price)}</td><td class="number">${euros(a.new_price)}</td><td class="${a.status === 'success' ? 'positive' : 'negative'}">${labels[a.status] ?? escape(a.status)}<small>${escape(a.detail)}</small></td></tr>`).join('') : '<tr><td colspan="7" class="empty">Δεν έχουν καταγραφεί αλλαγές τιμών ή κόστους.</td></tr>';
   $('#sync').disabled = state.job.running || state.job.costSaving || state.job.priceSaving;
   $('#job').hidden = !state.job.running && !state.job.message && !state.job.error;
-  $('#job').textContent = state.job.running ? `${state.job.type === 'sync' ? 'Συγχρονισμός προϊόντων' : state.job.type === 'shipping-sync' ? 'Συγχρονισμός μεταφορικών' : state.job.type === 'shipping-apply' ? 'Ενημέρωση μεταφορικών' : state.job.type === 'manual' ? 'Μαζική επεξεργασία προϊόντων' : 'Ενημέρωση τιμών'}: ${state.job.completed}${state.job.total ? ' / ' + state.job.total : ''}…` : state.job.error || state.job.message;
+  $('#job').textContent = state.job.running ? `${state.job.type === 'sync' ? 'Συγχρονισμός προϊόντων' : state.job.type === 'postal-refresh' ? 'Ενημέρωση χωρών & ΤΚ' : state.job.type === 'shipping-sync' ? 'Συγχρονισμός μεταφορικών' : state.job.type === 'shipping-apply' ? 'Ενημέρωση μεταφορικών' : state.job.type === 'manual' ? 'Μαζική επεξεργασία προϊόντων' : 'Ενημέρωση τιμών'}: ${state.job.completed}${state.job.total ? ' / ' + state.job.total : ''}…` : state.job.error || state.job.message;
   if (wasRunning && !state.job.running) notify(state.job.error || state.job.message, Boolean(state.job.error));
   if (state.job.running) timer = setTimeout(() => load().catch(e => notify(e.message, true)), 2000);
 }
@@ -326,5 +327,6 @@ $('#test-connection').addEventListener('click', event => action(event.currentTar
   const result = await api('settings/test', {}); $('#connection-result').textContent = `Επιτυχής σύνδεση: ${result.shop.name} · ${result.shop.currencyCode}`;
 }));
 const shipping = shippingUI({ $, api, action, notify, load, euros, escape, date });
+const postal = postalUI({ $, api, action, notify, load, escape, date });
 ruleExample();
 load().catch(error => { if (state) notify(error.message, true); else { $('#login').hidden = false; if (error.message !== 'Χρειάζεται σύνδεση.') notify(error.message, true); } });

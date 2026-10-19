@@ -15,7 +15,7 @@ export function validateDhlSettings(input, previous = {}) {
 }
 export function validateShipment(input) {
   const s = { destinationCountryCode: text(input.destinationCountryCode, 'Χώρα παραλήπτη', 2).toUpperCase(),
-    destinationPostalCode: text(input.destinationPostalCode, 'ΤΚ παραλήπτη', 20), destinationCityName: text(input.destinationCityName, 'Πόλη παραλήπτη'),
+    destinationPostalCode: input.destinationPostalCode === '' ? '' : text(input.destinationPostalCode, 'ΤΚ παραλήπτη', 20), destinationCityName: text(input.destinationCityName, 'Πόλη παραλήπτη'),
     plannedShippingDate: text(input.plannedShippingDate, 'Ημερομηνία αποστολής', 10), isCustomsDeclarable: input.isCustomsDeclarable };
   if (!/^[A-Z]{2}$/.test(s.destinationCountryCode) || typeof s.isCustomsDeclarable !== 'boolean') throw new Error('Έλεγξε χώρα και τελωνειακή δήλωση.');
   const date = new Date(s.plannedShippingDate + 'T00:00:00Z');
@@ -33,6 +33,7 @@ export function createDhl(settings, fetcher = fetch) {
     const params = new URLSearchParams({ accountNumber: settings.accountNumber,
       originCountryCode: settings.originCountryCode, originPostalCode: settings.originPostalCode, originCityName: settings.originCityName,
       ...sample, unitOfMeasurement: 'metric' });
+    if (!sample.destinationPostalCode) params.delete('destinationPostalCode');
     const base = 'https://express.api.dhl.com/mydhlapi' + (settings.environment === 'test' ? '/test' : '');
     const response = await fetcher(`${base}/rates?${params}`, { redirect: 'error', signal: AbortSignal.timeout(30000),
       headers: { Accept: 'application/json', Authorization: 'Basic ' + Buffer.from(settings.username + ':' + settings.password).toString('base64') } });

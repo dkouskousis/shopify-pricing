@@ -140,3 +140,12 @@ test('bulk sample autofill handles 2000 tiers in one local save without Shopify 
  const h=await harness(t);const rows=Array.from({length:2000},(_,i)=>({...h.rows[0],id:'tier-'+i}));h.app.store.put('shippingRates',rows);
  const r=await h.request('shipping/samples/autofill',{ids:rows.map(r=>r.id)});assert.equal(r.status,200);assert.equal(r.data.saved.length,2000);assert.equal(Object.keys(h.app.store.get('shippingSamples')).length,2000);assert.equal(h.writes.length,0);
 });
+
+test('country directory save requires CSRF, persists into state and rejects malformed entries',async t=>{
+ const h=await harness(t),path='shipping/countries/save',entry={code:'BD',city:'Dhaka',postalCode:'1205',noPostalCode:false};
+ assert.equal((await h.request(path,entry,{'X-CSRF-Token':''})).status,403);
+ assert.equal((await h.request(path,{...entry,postalCode:''})).status,400);
+ assert.equal((await h.request(path,entry)).status,200);
+ const directory=(await h.request('state')).data.shipping.directory;assert.equal(directory.BD.postalCode,'1205');assert.ok(Object.keys(directory).length>=249);
+ assert.equal((await h.request('shipping/countries/refresh',{codes:['XX']})).status,400);assert.equal(h.writes.length,0);
+});
