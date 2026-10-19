@@ -1,3 +1,4 @@
+import { sampleDefaults } from './public/shipping-sample.mjs';
 import { randomBytes } from 'node:crypto';
 import { shippingRates, shippingFingerprint, shippingUpdate, adjustedShippingPrice, SHIPPING_QUERIES } from './shipping.mjs';
 import { validateDhlSettings, validateShipment, createDhl } from './dhl.mjs';
@@ -8,10 +9,11 @@ export function createShippingService({ store, graphql, startJob, jobState, safe
   dhlSettings();
   function state() {
     const d = dhlSettings(), { password, ...safe } = d ?? {};
+    const samples = store.get('shippingSamples') ?? {};
     for (const [id, q] of quotes) if (Date.now() - Date.parse(q.at) > 15 * 60000) quotes.delete(id);
     for (const [id, p] of plans) if (p.expires < Date.now()) plans.delete(id);
     return { dhl: d ? { ...safe, hasPassword: Boolean(password) } : null, lastSync: store.get('shippingSync'),
-      rows: (store.get('shippingRates') ?? []).map(r => ({ ...r, sample: store.get('shippingSamples')?.[r.id] ?? null, quote: quotes.get(r.id) ?? null })) };
+      rows: (store.get('shippingRates') ?? []).map(r => ({ ...r, sample: samples[r.id] ?? null, quote: quotes.get(r.id) ?? null })) };
   }
   const cachedRow = id => { const r = (store.get('shippingRates') ?? []).find(r => r.id === id); if (!r) throw new Error('Δεν βρέθηκε η κλίμακα. Κάνε συγχρονισμό μεταφορικών.'); return r; };
   async function freshRow(row) {
@@ -62,6 +64,33 @@ export function createShippingService({ store, graphql, startJob, jobState, safe
         store.put('shippingRates', rows); store.put('shippingSync', new Date().toISOString()); quotes.clear(); plans.clear();
         jobState().message = `Συγχρονίστηκαν ${rows.length} κλίμακες μεταφορικών.`;
       }); return { ok: true };
+    }
+    if (path === '/api/shipping/samples/autofill') {
+      if (!Array.isArray(input.ids) || input.ids.length < 1 || input.ids.length > 2000 || new Set(input.ids).size !== input.ids.length) throw new Error('Επίλεξε 1–2.000 διαφορετικές κλίμακες.');
+      const rates = new Map((store.get('shippingRates') ?? []).map(row => [row.id, row]));
+      const rows = input.ids.map(id => {
+        const row = rates.get(id);
+        if (!row) throw new Error('Δεν βρέθηκε η κλίμακα. Κάνε συγχρονισμό μεταφορικών.');
+        return row;
+      });
+      const samples = { ...(store.get('shippingSamples') ?? {}) };
+      const saved = [], skipped = [], today = new Date().toISOString().slice(0,10);
+      for (const row of rows) {
+        try {
+          const values = sampleDefaults(row, today);
+          if (!values.destinationCountryCode || !values.destinationCityName || !values.destinationPostalCode || !values.weight) throw new Error('Λείπει χώρα, πόλη, επιβεβαιωμένος ΤΚ ή μέγιστο βάρος. Συμπλήρωσε το δείγμα χειροκίνητα.');
+          const sample = validateShipment({ ...values, isCustomsDeclarable: samples[row.id]?.isCustomsDeclarable ?? false });
+          checkSample(row, sample); samples[row.id] = sample; saved.push(row.id);
+        } catch (error) {
+          skipped.push({ id: row.id, title: `${row.zoneName} / ${row.name}`, error: safeError(error) });
+        }
+      }
+      if (saved.length) {
+        store.put('shippingSamples', samples);
+        for (const id of saved) quotes.delete(id);
+        plans.clear();
+      }
+      return { ok: true, saved, skipped };
     }
     if (path === '/api/shipping/sample') {
       const row = cachedRow(input.id), sample = validateShipment(input.sample);

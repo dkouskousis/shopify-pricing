@@ -109,3 +109,34 @@ test('in-flight DHL requests block concurrent Shopify writes and credential edit
  let state;for(let i=0;i<50;i++){state=(await h.request('state')).data;if(state.job.priceSaving)break;await setTimeout(2);}assert.equal(state.job.priceSaving,true);
  assert.equal((await h.request('dhl/settings',dhl)).status,409);assert.equal((await h.request('shipping/sync',{})).status,409);release();assert.equal((await pending).status,200);
 });
+test('bulk sample autofill saves only selected tiers with their own maximum weight and preserves customs choice',async t=>{
+ const h=await harness(t);const rows=structuredClone(h.rows);rows[1].conditions[0].conditionCriteria.value=5;h.app.store.put('shippingRates',rows);
+ await h.request('shipping/sample',{id:rows[0].id,sample:{...sample,isCustomsDeclarable:true}});
+ const result=await h.request('shipping/samples/autofill',{ids:rows.slice(0,2).map(r=>r.id)});assert.equal(result.status,200);assert.equal(result.data.saved.length,2);assert.deepEqual(result.data.skipped,[]);
+ const s=(await h.request('state')).data;assert.equal(s.shipping.rows[0].sample.weight,2);assert.equal(s.shipping.rows[1].sample.weight,5);
+ assert.equal(s.shipping.rows[0].sample.isCustomsDeclarable,true);assert.equal(s.shipping.rows[1].sample.isCustomsDeclarable,false);
+ for(const row of s.shipping.rows.slice(0,2)){assert.equal(row.sample.destinationPostalCode,'10115');assert.equal(row.sample.destinationCityName,'Berlin');assert.equal(row.sample.length,10);assert.equal(row.sample.width,10);assert.equal(row.sample.height,10);}
+ assert.equal(s.shipping.rows[2].sample,null);assert.equal(h.writes.length,0);
+});
+test('bulk autofill skips incomplete tiers and preserves their previous samples while filling the rest',async t=>{
+ const h=await harness(t);await h.request('shipping/sample',{id:h.rows[0].id,sample});const old=h.app.store.get('shippingSamples')[h.rows[0].id];
+ const rows=structuredClone(h.rows);rows[0].conditions=[];rows[1].countries=[{name:'Afghanistan',code:{countryCode:'AF',restOfWorld:false}}];h.app.store.put('shippingRates',rows);
+ const r=await h.request('shipping/samples/autofill',{ids:rows.slice(0,3).map(r=>r.id)});assert.equal(r.status,200);assert.deepEqual(r.data.saved,[rows[2].id]);assert.equal(r.data.skipped.length,2);
+ assert.deepEqual(h.app.store.get('shippingSamples')[rows[0].id],old);assert.equal(h.app.store.get('shippingSamples')[rows[1].id],undefined);
+});
+test('bulk autofill invalidates quotes only for updated samples and invalidates shipping previews',async t=>{
+ const h=await harness(t);await h.request('dhl/settings',dhl);
+ for(const row of h.rows.slice(0,2)){await h.request('shipping/sample',{id:row.id,sample});await h.request('shipping/quote',{id:row.id});}
+ const p=(await h.request('shipping/preview',{ids:[h.rows[0].id],base:'current',kind:'fixed',value:'2'})).data;
+ await h.request('shipping/samples/autofill',{ids:[h.rows[0].id]});const s=(await h.request('state')).data;
+ assert.equal(s.shipping.rows[0].quote,null);assert.ok(s.shipping.rows[1].quote);assert.equal((await h.request('shipping/apply',{id:p.id})).status,400);
+});
+test('bulk sample autofill rejects malformed selections and CSRF before changing samples',async t=>{
+ const h=await harness(t);const path='shipping/samples/autofill';
+ for(const ids of [[],[h.rows[0].id,h.rows[0].id],['missing'],Array.from({length:2001},(_,i)=>String(i))])assert.equal((await h.request(path,{ids})).status,400);
+ assert.equal((await h.request(path,{ids:[h.rows[0].id]},{'X-CSRF-Token':''})).status,403);assert.equal(h.app.store.get('shippingSamples'),null);
+});
+test('bulk sample autofill handles 2000 tiers in one local save without Shopify writes',async t=>{
+ const h=await harness(t);const rows=Array.from({length:2000},(_,i)=>({...h.rows[0],id:'tier-'+i}));h.app.store.put('shippingRates',rows);
+ const r=await h.request('shipping/samples/autofill',{ids:rows.map(r=>r.id)});assert.equal(r.status,200);assert.equal(r.data.saved.length,2000);assert.equal(Object.keys(h.app.store.get('shippingSamples')).length,2000);assert.equal(h.writes.length,0);
+});

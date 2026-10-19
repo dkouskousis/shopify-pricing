@@ -46,7 +46,7 @@ export function shippingUI({ $, api, action, notify, load, euros, escape, date }
     $('#shipping-page').textContent = `${page+1} / ${pages}`;
     $('#shipping-previous').disabled = page===0; $('#shipping-next').disabled = page>=pages-1;
     $('#shipping-preview').disabled = !selected.size || busy; $('#shipping-quotes').disabled = !selected.size || busy;
-    $('#shipping-sync').disabled = busy;
+    $('#shipping-sync').disabled = busy; $('#shipping-autofill-selected').disabled = !selected.size || busy;
   }
   function options(selector, values, label) {
     const old = $(selector).value;
@@ -115,6 +115,14 @@ export function shippingUI({ $, api, action, notify, load, euros, escape, date }
     const sample=Object.fromEntries(new FormData(e.target));sample.isCustomsDeclarable=e.target.elements.isCustomsDeclarable.checked;
     await api('shipping/sample',{id:sampleId,sample});$('#shipment-dialog').close();await load();notify('Το δείγμα αποθηκεύτηκε.');
   });});
+  $('#shipping-autofill-selected').addEventListener('click', e => action(e.currentTarget, async () => {
+    const result = await api('shipping/samples/autofill', { ids: [...selected] });
+    await load();
+    const message = `${result.saved.length} δείγματα αποθηκεύτηκαν · ${result.skipped.length} παραλείφθηκαν.`;
+    $('#shipping-autofill-result').hidden = false;
+    $('#shipping-autofill-result').innerHTML = `<p>${escape(message)}</p>` + (result.skipped.length ? `<details><summary>Δες ποιες κλίμακες χρειάζονται χειροκίνητη συμπλήρωση</summary><ul>${result.skipped.map(item => `<li>${escape(item.title)}: ${escape(item.error)}</li>`).join('')}</ul></details>` : '');
+    notify(message, Boolean(result.skipped.length));
+  }));
   $('#shipping-quotes').addEventListener('click',e=>action(e.currentTarget,async()=>{
     const ids=[...selected];let done=0,failed=0;let lastError='';
     for(const id of ids){try{await api('shipping/quote',{id});done++;}catch(e){failed++;lastError=e.message;}$('#shipping-selection-count').textContent=`DHL: ${done+failed} / ${ids.length} · ${failed} αποτυχίες`;}
@@ -126,5 +134,5 @@ export function shippingUI({ $, api, action, notify, load, euros, escape, date }
   }));
   $('#shipping-preview-close').addEventListener('click',()=>$('#shipping-preview-dialog').close());
   $('#shipping-apply').addEventListener('click',e=>action(e.currentTarget,async()=>{await api('shipping/apply',{id:previewId});previewId=null;$('#shipping-preview-dialog').close();selected.clear();await load();}));
-  return { render, reset(){selected.clear();state=null;dhlDirty=false;$('#dhl-form').reset();} };
+  return { render, reset(){selected.clear();state=null;dhlDirty=false;$('#shipping-autofill-result').hidden=true;$('#shipping-autofill-result').textContent='';$('#dhl-form').reset();} };
 }
