@@ -1,3 +1,4 @@
+import { decimal } from './pricing.mjs';
 import { directoryState, editDestination, countryList, refreshDestination } from './postal-directory.mjs';
 import { sampleDefaults } from './public/shipping-sample.mjs';
 import { randomBytes } from 'node:crypto';
@@ -14,32 +15,36 @@ export function createShippingService({ store, graphql, startJob, jobState, safe
     for (const [id, q] of quotes) if (Date.now() - Date.parse(q.at) > 15 * 60000) quotes.delete(id);
     for (const [id, p] of plans) if (p.expires < Date.now()) plans.delete(id);
     return { directory: directoryState(store), dhl: d ? { ...safe, hasPassword: Boolean(password) } : null, lastSync: store.get('shippingSync'),
-      rows: (store.get('shippingRates') ?? []).map(r => ({ ...r, sample: samples[r.id] ?? null, quote: quotes.get(r.id) ?? null })) };
+      rows: (store.get('shippingRates') ?? []).map(r => ({ ...r, fingerprint: shippingFingerprint(r), sample: samples[r.id] ?? null, quote: quotes.get(r.id) ?? null })) };
   }
   const cachedRow = id => { const r = (store.get('shippingRates') ?? []).find(r => r.id === id); if (!r) throw new Error('Δεν βρέθηκε η κλίμακα. Κάνε συγχρονισμό μεταφορικών.'); return r; };
   async function freshRow(row) {
     return (await shippingRates(graphql(), { id: row.profileId, name: row.profileName, profileLocationGroups: [{ locationGroup: { id: row.groupId } }] })).find(r => r.id === row.id);
   }
+  async function updatePrice(item) {
+    const audit = db.prepare('INSERT INTO audit(created,variant_id,title,old_price,new_price,status,detail,kind) VALUES (?,?,?,?,?,?,?,?)')
+      .run(new Date().toISOString(), item.id, item.title, item.oldPrice, item.newPrice, 'pending', 'Μεταφορικά', 'shipping');
+    let sending = false;
+    try {
+      const fresh = await freshRow(item.row);
+      if (!fresh || !fresh.editable || shippingFingerprint(fresh) !== item.fingerprint) throw new Error('Η κλίμακα άλλαξε στο Shopify. Συγχρόνισε ξανά πριν την ενημέρωση.');
+      sending = true;
+      const payload = (await graphql()(SHIPPING_QUERIES.update, shippingUpdate(fresh, item.newPrice))).deliveryProfileUpdate;
+      if (payload.userErrors.length) { sending = false; throw new Error(payload.userErrors.map(e => e.message).join('; ')); }
+      const confirmed = await freshRow(fresh);
+      if (!confirmed || confirmed.price !== item.newPrice || shippingFingerprint({ ...confirmed, price: fresh.price }) !== item.fingerprint) throw new Error('Δεν επιβεβαιώθηκε η αποθήκευση χωρίς αλλαγή όρων. Συγχρόνισε και έλεγξε το Shopify.');
+      store.put('shippingRates', (store.get('shippingRates') ?? []).map(r => r.id === item.id ? confirmed : r));
+      db.prepare("UPDATE audit SET status='success',detail='Μεταφορικά' WHERE id=?").run(audit.lastInsertRowid); return { ok: true };
+    } catch (e) {
+      db.prepare('UPDATE audit SET status=?,detail=? WHERE id=?').run(sending ? 'uncertain' : 'failed', safeError(e), audit.lastInsertRowid); return { error: safeError(e) };
+    }
+  }
   async function apply(plan) {
     const job = jobState(); job.total = plan.items.length; let success = 0, failed = 0;
     for (const item of plan.items) {
       if (stopping()) break;
-      const audit = db.prepare('INSERT INTO audit(created,variant_id,title,old_price,new_price,status,detail,kind) VALUES (?,?,?,?,?,?,?,?)')
-        .run(new Date().toISOString(), item.id, item.title, item.oldPrice, item.newPrice, 'pending', 'Μεταφορικά', 'shipping');
-      let sending = false;
-      try {
-        const fresh = await freshRow(item.row);
-        if (!fresh || !fresh.editable || shippingFingerprint(fresh) !== item.fingerprint) throw new Error('Η κλίμακα άλλαξε στο Shopify. Συγχρόνισε ξανά πριν την ενημέρωση.');
-        sending = true;
-        const payload = (await graphql()(SHIPPING_QUERIES.update, shippingUpdate(fresh, item.newPrice))).deliveryProfileUpdate;
-        if (payload.userErrors.length) { sending = false; throw new Error(payload.userErrors.map(e => e.message).join('; ')); }
-        const confirmed = await freshRow(fresh);
-        if (!confirmed || confirmed.price !== item.newPrice || shippingFingerprint({ ...confirmed, price: fresh.price }) !== item.fingerprint) throw new Error('Δεν επιβεβαιώθηκε η αποθήκευση χωρίς αλλαγή όρων. Συγχρόνισε και έλεγξε το Shopify.');
-        store.put('shippingRates', (store.get('shippingRates') ?? []).map(r => r.id === item.id ? confirmed : r));
-        db.prepare("UPDATE audit SET status='success',detail='Μεταφορικά' WHERE id=?").run(audit.lastInsertRowid); success++;
-      } catch (e) {
-        db.prepare('UPDATE audit SET status=?,detail=? WHERE id=?').run(sending ? 'uncertain' : 'failed', safeError(e), audit.lastInsertRowid); failed++;
-      }
+      const result = await updatePrice(item);
+      if (result.ok) success++; else failed++;
       job.completed++;
     }
     job.message = `Μεταφορικά: ${success} ενημερώθηκαν, ${failed} χρειάζονται έλεγχο.${stopping() ? ' Η εργασία διακόπηκε λόγω επανεκκίνησης.' : ''}`;
@@ -143,6 +148,21 @@ export function createShippingService({ store, graphql, startJob, jobState, safe
       quotes.delete(row.id); plans.clear();
       const quote = await makeDhl(s)(sample);
       quotes.set(row.id, quote); return { ok: true, quote };
+    }
+    if (path === '/api/shipping/price') {
+      const row = cachedRow(input.id), newPrice = decimal(input.price, 'Τιμή μεταφορικών');
+      if (!row.editable) throw new Error('Υποστηρίζονται μόνο σταθερές χρεώσεις EUR.');
+      const fingerprint = shippingFingerprint(row);
+      if (input.expectedFingerprint !== fingerprint) throw Object.assign(new Error('Η κλίμακα άλλαξε. Ανανέωσε τη λίστα και δοκίμασε ξανά.'), { status: 409 });
+      if (row.price === newPrice) {
+        const fresh = await freshRow(row);
+        if (!fresh || shippingFingerprint(fresh) !== fingerprint) throw Object.assign(new Error('Η κλίμακα άλλαξε στο Shopify. Συγχρόνισε ξανά.'), { status: 409 });
+        return { ok: true, changed: false };
+      }
+      plans.clear();
+      const result = await updatePrice({ id: row.id, title: `${row.profileName} / ${row.zoneName} / ${row.name}`, oldPrice: row.price, newPrice, row, fingerprint });
+      if (!result.ok) throw new Error(result.error);
+      return { ok: true, changed: true };
     }
     if (path === '/api/shipping/preview') {
       if (!Array.isArray(input.ids) || input.ids.length < 1 || input.ids.length > 2000 || new Set(input.ids).size !== input.ids.length) throw new Error('Επίλεξε 1–2.000 διαφορετικές κλίμακες.');

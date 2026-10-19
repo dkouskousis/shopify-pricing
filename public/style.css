@@ -20,3 +20,5 @@
 
 #bulk-dialog { width:min(600px,95vw); }
 #bulk-preview-dialog { width:min(1000px,95vw); }
+
+#shipping .shipping-price-button { color:inherit; font-weight:inherit; }

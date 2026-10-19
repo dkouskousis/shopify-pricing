@@ -149,3 +149,34 @@ test('country directory save requires CSRF, persists into state and rejects malf
  const directory=(await h.request('state')).data.shipping.directory;assert.equal(directory.BD.postalCode,'1205');assert.ok(Object.keys(directory).length>=249);
  assert.equal((await h.request('shipping/countries/refresh',{codes:['XX']})).status,400);assert.equal(h.writes.length,0);
 });
+
+test('manual shipping price saves exact cents, preserves the tier and records verified history',async t=>{
+ const h=await harness(t),row=h.rows[0],before=structuredClone(h.methods[0].methodConditions);
+ const result=await h.request('shipping/price',{id:row.id,price:'12,37',expectedFingerprint:row.fingerprint});assert.equal(result.status,200);assert.equal(result.data.changed,true);
+ assert.equal(h.writes.length,1);assert.deepEqual(h.methods[0].methodConditions,before);
+ const state=(await h.request('state')).data;assert.equal(state.shipping.rows[0].price,1237);assert.equal(state.audit[0].status,'success');assert.equal(state.audit[0].kind,'shipping');
+ assert.notEqual(state.shipping.rows[0].fingerprint,row.fingerprint);
+ assert.equal((await h.request('shipping/price',{id:row.id,price:'14',expectedFingerprint:row.fingerprint})).status,409);assert.equal(h.writes.length,1);
+});
+test('manual shipping edit rejects malformed values, missing CSRF and carrier rates while allowing an explicit zero price',async t=>{
+ const h=await harness(t),row=h.rows[0],input={id:row.id,price:'15',expectedFingerprint:row.fingerprint};
+ assert.equal((await h.request('shipping/price',input,{'X-CSRF-Token':''})).status,403);
+ for(const price of ['-1','1.999','','abc','1000001'])assert.equal((await h.request('shipping/price',{...input,price})).status,400);
+ const carrier=h.rows[3];assert.equal((await h.request('shipping/price',{...input,id:carrier.id,expectedFingerprint:carrier.fingerprint})).status,400);assert.equal(h.writes.length,0);
+ assert.equal((await h.request('shipping/price',{...input,price:'0'})).status,200);assert.equal(h.methods[0].rateProvider.price.amount,'0.00');
+});
+test('manual shipping edit refuses external changes before writing and distinguishes rejected and uncertain writes',async t=>{
+ const h=await harness(t),row=h.rows[0],input={id:row.id,price:'15.99',expectedFingerprint:row.fingerprint};
+ h.methods[0].rateProvider.price.amount='11.00';assert.equal((await h.request('shipping/price',input)).status,400);assert.equal(h.writes.length,0);
+ assert.equal((await h.request('state')).data.audit[0].status,'failed');
+ h.methods[0].rateProvider.price.amount='10.00';h.setWriteFailure('denied');assert.equal((await h.request('shipping/price',input)).status,400);assert.equal((await h.request('state')).data.audit[0].status,'failed');
+ h.setWriteFailure('network');assert.equal((await h.request('shipping/price',input)).status,400);assert.equal((await h.request('state')).data.audit[0].status,'uncertain');
+});
+test('manual unchanged shipping price checks freshness without writing and invalidates older bulk plans on changes',async t=>{
+ const h=await harness(t),row=h.rows[0],input={id:row.id,price:'10.00',expectedFingerprint:row.fingerprint};
+ assert.equal((await h.request('shipping/price',input)).data.changed,false);assert.equal(h.writes.length,0);
+ h.methods[0].rateProvider.price.amount='11.00';assert.equal((await h.request('shipping/price',input)).status,409);h.methods[0].rateProvider.price.amount='10.00';
+ const preview=(await h.request('shipping/preview',{ids:[row.id],base:'current',kind:'fixed',value:'2'})).data;
+ assert.equal((await h.request('shipping/price',{...input,price:'14.50'})).status,200);
+ assert.equal((await h.request('shipping/apply',{id:preview.id})).status,400);assert.equal(h.writes.length,1);
+});

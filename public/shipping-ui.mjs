@@ -1,6 +1,6 @@
 import { sampleDefaults } from './shipping-sample.mjs';
 export function shippingUI({ $, api, action, notify, load, euros, escape, date }) {
-  let state, selected = new Set(), page = 0, sampleId = null, previewId = null, dhlDirty = false;
+  let state, selected = new Set(), page = 0, sampleId = null, previewId = null, dhlDirty = false, priceEdit = null, pricePending = false;
   const percent = n => new Intl.NumberFormat('el-GR', { maximumFractionDigits: 2 }).format(n);
   function filtered() {
     const profile = $('#shipping-profile').value, zone = $('#shipping-zone').value, search = $('#shipping-search').value.toLocaleLowerCase('el');
@@ -39,7 +39,7 @@ export function shippingUI({ $, api, action, notify, load, euros, escape, date }
         <td><strong>${escape(r.name)}</strong><small>${escape(conditions(r))}<br>${r.active?'Ενεργή':'Ανενεργή'}${r.editable?'': ' · Μόνο ανάγνωση ('+escape(r.currency||'carrier')+')'}</small></td>
         <td class="number">${r.currency==='EUR'?euros(r.price): r.price===null?'Αυτόματη χρέωση':escape((r.price/100).toFixed(2)+' '+r.currency)}</td>
         <td class="number">${fresh && service?euros(service.price):'—'}${q?`<small>${q.environment==='test'?'TEST · ':''}${escape(service?.name || 'Επίλεξε υπηρεσία')}<br>${date(q.at)}${!fresh?' · Έληξε':''}${service?.weight?.volumetric != null?'<br>Ογκομετρικό: '+escape(service.weight.volumetric)+' kg':''}</small>`:''}</td>
-        <td class="number ${direction?'price-'+direction:''}">${direction?(direction==='up'?'↑ ':'↓ '):''}${proposed===null?'—':euros(proposed)}</td>
+        <td class="number ${direction?'price-'+direction:''}">${r.editable ? `<button class="quiet cost-button shipping-price-button" data-shipping-price="${escape(r.id)}" aria-label="Αλλαγή τιμής μεταφορικών για ${escape(r.zoneName)} ${escape(r.name)}" ${busy?'disabled':''}>${direction?(direction==='up'?'↑ ':'↓ '):''}${proposed===null?'Ορισμός τιμής':euros(proposed)}</button>` : '—'}</td>
         <td><small>${s?escape(`${s.destinationCountryCode} ${s.destinationPostalCode} · ${s.destinationCityName} · ${s.weight} kg · ${s.length}×${s.width}×${s.height} cm · ${s.plannedShippingDate}`):'Δεν έχει οριστεί δείγμα'}</small><div class="actions"><button class="quiet" data-shipment="${escape(r.id)}" ${busy?'disabled':''}>${s?'Δείγμα':'Ορισμός δείγματος'}</button><button class="quiet" data-quote="${escape(r.id)}" ${!s||busy?'disabled':''}>Λήψη DHL</button></div></td></tr>`;
     }).join('') || '<tr><td colspan="7" class="empty">Δεν υπάρχουν κλίμακες. Κάνε συγχρονισμό μεταφορικών ή άλλαξε φίλτρα.</td></tr>';
     $('#shipping-selection-count').textContent = `${selected.size} επιλεγμένες · ${all.length} στο φίλτρο`;
@@ -82,6 +82,14 @@ export function shippingUI({ $, api, action, notify, load, euros, escape, date }
   $('#shipping-previous').addEventListener('click',()=>{page--;renderRows();});$('#shipping-next').addEventListener('click',()=>{page++;renderRows();});
   $('#shipping-rows').addEventListener('change',e=>{const id=e.target.dataset.shippingSelect;if(!id)return;if(e.target.checked&&selected.size>=2000){e.target.checked=false;notify('Μέχρι 2.000 κλίμακες.',true);return;}e.target.checked?selected.add(id):selected.delete(id);renderRows();});
   $('#shipping-rows').addEventListener('click',e=>{
+    const price = e.target.closest('[data-shipping-price]');
+    if (price) {
+      const row = state.shipping.rows.find(r => r.id === price.dataset.shippingPrice);
+      priceEdit = { id: row.id, expectedFingerprint: row.fingerprint };
+      $('#shipping-price-row').textContent = `${row.profileName} / ${row.zoneName} / ${row.name} · Τωρινή τιμή: ${euros(row.price)}`;
+      $('#shipping-price-form').elements.price.value = ((proposal(row) ?? row.price) / 100).toFixed(2);
+      $('#shipping-price-dialog').showModal(); $('#shipping-price-form').elements.price.focus(); return;
+    }
     const sample=e.target.closest('[data-shipment]'),quote=e.target.closest('[data-quote]');
     if(sample){const r=state.shipping.rows.find(r=>r.id===sample.dataset.shipment);sampleId=r.id;$('#shipment-autofill-note').textContent='';const form=$('#shipment-form');form.reset();
       $('#shipment-row-label').textContent=`${r.profileName} / ${r.zoneName} / ${r.name} · ${conditions(r)}`;
@@ -135,6 +143,19 @@ export function shippingUI({ $, api, action, notify, load, euros, escape, date }
     for(const id of ids){try{await api('shipping/quote',{id});done++;}catch(e){failed++;lastError=e.message;}$('#shipping-selection-count').textContent=`DHL: ${done+failed} / ${ids.length} · ${failed} αποτυχίες`;}
     await load();notify(`DHL: ${done} προσφορές, ${failed} αποτυχίες.${lastError?' '+lastError:''}`,Boolean(failed));
   }));
+  $('#shipping-price-close').addEventListener('click', () => { if (!pricePending) $('#shipping-price-dialog').close(); });
+  $('#shipping-price-dialog').addEventListener('cancel', e => { if (pricePending) e.preventDefault(); });
+  $('#shipping-price-form').addEventListener('submit', e => {
+    e.preventDefault(); if (!priceEdit || pricePending) return;
+    action(e.submitter, async () => {
+      pricePending = true; $('#shipping-price-close').disabled = true;
+      try {
+        const result = await api('shipping/price', { ...priceEdit, price: e.target.elements.price.value });
+        selected.delete(priceEdit.id); priceEdit = null; $('#shipping-price-dialog').close(); await load();
+        notify(result.changed ? 'Η τιμή μεταφορικών αποθηκεύτηκε στο Shopify.' : 'Η τιμή μεταφορικών είναι ήδη ίδια.');
+      } finally { pricePending = false; $('#shipping-price-close').disabled = false; }
+    });
+  });
   $('#shipping-preview').addEventListener('click',e=>action(e.currentTarget,async()=>{
     const plan=await api('shipping/preview',{ids:[...selected],base:$('#shipping-base').value,serviceCode:$('#shipping-service').value,kind:$('#shipping-kind').value,value:$('#shipping-value').value,includeFree:$('#shipping-include-free').checked});
     previewId=plan.id;$('#shipping-preview-rows').innerHTML=plan.items.map(i=>`<tr><td>${escape(i.title)}</td><td>${euros(i.oldPrice)}</td><td class="${i.newPrice>i.oldPrice?'price-up':'price-down'}">${euros(i.newPrice)}</td><td>${euros(i.newPrice-i.oldPrice)}</td></tr>`).join('');$('#shipping-preview-dialog').showModal();
