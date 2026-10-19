@@ -367,7 +367,7 @@ export function createApplication(config, dependencies = {}) {
         }
         fail('Δεν βρέθηκε.', 404);
       }
-      const paths = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/shipping-ui.mjs': ['shipping-ui.mjs', 'text/javascript'], '/postal-ui.mjs': ['postal-ui.mjs', 'text/javascript'], '/shipping-sample.mjs': ['shipping-sample.mjs', 'text/javascript'], '/product-filters.mjs': ['product-filters.mjs', 'text/javascript'], '/pricing.mjs': ['pricing.mjs', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
+      const paths = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/shipping-ui.mjs': ['shipping-ui.mjs', 'text/javascript'], '/shipping-table-ui.mjs': ['shipping-table-ui.mjs', 'text/javascript'], '/postal-ui.mjs': ['postal-ui.mjs', 'text/javascript'], '/shipping-sample.mjs': ['shipping-sample.mjs', 'text/javascript'], '/product-filters.mjs': ['product-filters.mjs', 'text/javascript'], '/pricing.mjs': ['pricing.mjs', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
       if (req.method === 'GET' && paths[url.pathname]) {
         const [file, type] = paths[url.pathname];
         res.writeHead(200, { ...headers, 'Content-Type': `${type}; charset=utf-8` });

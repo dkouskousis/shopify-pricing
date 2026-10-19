@@ -22,3 +22,6 @@
 #bulk-preview-dialog { width:min(1000px,95vw); }
 
 #shipping .shipping-price-button { color:inherit; font-weight:inherit; }
+
+.public-mapping-table td,.public-mapping-table th{min-width:215px;vertical-align:top}.public-mapping-table select{font-size:11px;margin-top:9px;padding:8px;max-width:230px}.public-mapping-table th:first-child{min-width:110px}.public-mapping-table strong{font-variant-numeric:tabular-nums}
+.public-mapping-table th select{display:block}.public-mapping-table th:first-child{position:sticky;left:0;background:#f0f1ea;z-index:1}

@@ -190,3 +190,9 @@ test('manual unchanged shipping price checks freshness without writing and inval
  assert.equal((await h.request('shipping/price',{...input,price:'14.50'})).status,200);
  assert.equal((await h.request('shipping/apply',{id:preview.id})).status,400);assert.equal(h.writes.length,1);
 });
+test('public shipping-table endpoints require CSRF and reject invalid mappings or publication plans',async t=>{
+ const h=await harness(t);
+ assert.equal((await h.request('shipping/public-table/load',{}, {'X-CSRF-Token':''})).status,403);
+ assert.equal((await h.request('shipping/public-table/mapping',{layoutSignature:'invalid',cells:[]})).status,400);
+ assert.equal((await h.request('shipping/public-table/publish',{id:'invalid'})).status,400);assert.equal(h.writes.length,0);
+});

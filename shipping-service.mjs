@@ -1,3 +1,4 @@
+import { createPublicShippingTable } from './shipping-public-table.mjs';
 import { decimal } from './pricing.mjs';
 import { directoryState, editDestination, countryList, refreshDestination } from './postal-directory.mjs';
 import { sampleDefaults } from './public/shipping-sample.mjs';
@@ -7,6 +8,7 @@ import { validateDhlSettings, validateShipment, createDhl } from './dhl.mjs';
 const token = () => randomBytes(32).toString('hex');
 export function createShippingService({ store, graphql, startJob, jobState, safeError, stopping, makeDhl = createDhl, postalFetch = fetch }) {
   const shippingGraphql = () => (query, variables) => graphql()(query, variables, SHIPPING_API_VERSION);
+  const publicTable = createPublicShippingTable({store,graphql,shippingGraphql,safeError});
   const { db } = store, quotes = new Map(), plans = new Map();
   const dhlSettings = () => { const value = store.get('dhlSettings'); return value ? store.decrypt(value) : null; };
   dhlSettings();
@@ -15,7 +17,7 @@ export function createShippingService({ store, graphql, startJob, jobState, safe
     const samples = store.get('shippingSamples') ?? {};
     for (const [id, q] of quotes) if (Date.now() - Date.parse(q.at) > 15 * 60000) quotes.delete(id);
     for (const [id, p] of plans) if (p.expires < Date.now()) plans.delete(id);
-    return { directory: directoryState(store), dhl: d ? { ...safe, hasPassword: Boolean(password) } : null, lastSync: store.get('shippingSync'),
+    return { publicTable: publicTable.state(), directory: directoryState(store), dhl: d ? { ...safe, hasPassword: Boolean(password) } : null, lastSync: store.get('shippingSync'),
       needsSync: (store.get('shippingRates') ?? []).some(r => !r.rateGroupId),
       rows: (store.get('shippingRates') ?? []).map(r => ({ ...r, editable: r.editable && Boolean(r.rateGroupId), fingerprint: shippingFingerprint(r), sample: samples[r.id] ?? null, quote: quotes.get(r.id) ?? null })) };
   }
@@ -63,6 +65,7 @@ export function createShippingService({ store, graphql, startJob, jobState, safe
     }
   }
   async function handle(path, input) {
+    if (path.startsWith('/api/shipping/public-table/')) return publicTable.handle(path,input);
     if (path === '/api/shipping/countries/save') {
       const directory = directoryState(store);
       if (typeof input.code !== 'string' || !Object.hasOwn(directory, input.code)) throw new Error('Μη έγκυρη χώρα.');
