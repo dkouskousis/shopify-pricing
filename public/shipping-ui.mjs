@@ -1,7 +1,7 @@
 import { shippingTableUI } from './shipping-table-ui.mjs';
 import { sampleDefaults } from './shipping-sample.mjs';
 export function shippingUI({ $, api, action, notify, load, euros, escape, date }) {
-  const publicTable = shippingTableUI({ $, api, action, notify, load, escape, euros, date });
+  const summary = shippingTableUI({ $, escape, euros, date });
   let state, selected = new Set(), page = 0, sampleId = null, previewId = null, dhlDirty = false, priceEdit = null, pricePending = false;
   const percent = n => new Intl.NumberFormat('el-GR', { maximumFractionDigits: 2 }).format(n);
   function filtered() {
@@ -57,7 +57,7 @@ export function shippingUI({ $, api, action, notify, load, euros, escape, date }
     if (values.has(old)) $(selector).value=old;
   }
   function render(next) {
-    state = next; publicTable.render(next);
+    state = next; summary.render(next);
     const rows = state.shipping.rows;
     selected = new Set([...selected].filter(id=>rows.some(r=>r.id===id&&eligible(r))));
     options('#shipping-profile',new Map(rows.map(r=>[r.profileId,r.profileName])),'Όλα');
@@ -165,5 +165,5 @@ export function shippingUI({ $, api, action, notify, load, euros, escape, date }
   }));
   $('#shipping-preview-close').addEventListener('click',()=>$('#shipping-preview-dialog').close());
   $('#shipping-apply').addEventListener('click',e=>action(e.currentTarget,async()=>{await api('shipping/apply',{id:previewId});previewId=null;$('#shipping-preview-dialog').close();selected.clear();await load();}));
-  return { render, reset(){publicTable.reset();selected.clear();state=null;dhlDirty=false;$('#shipping-autofill-result').hidden=true;$('#shipping-autofill-result').textContent='';$('#dhl-form').reset();} };
+  return { render, reset(){summary.reset();selected.clear();state=null;dhlDirty=false;$('#shipping-autofill-result').hidden=true;$('#shipping-autofill-result').textContent='';$('#dhl-form').reset();} };
 }
