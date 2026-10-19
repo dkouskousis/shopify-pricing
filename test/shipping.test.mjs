@@ -85,7 +85,12 @@ test('DHL settings are encrypted, passwords masked, sample and chosen service dr
  assert.equal((await h.request('shipping/quote',{id:row.id})).status,400);
  assert.equal((await h.request('shipping/sample',{id:row.id,sample:{...sample,destinationCountryCode:'FR'}})).status,400);
  assert.equal((await h.request('shipping/sample',{id:row.id,sample})).status,200);assert.equal((await h.request('shipping/quote',{id:row.id})).status,200);
- const body={ids:[row.id],base:'dhl',kind:'fixed',value:'2',serviceCode:'P'};let p=(await h.request('shipping/preview',body)).data;assert.equal(p.items[0].newPrice,2050);
+ const body={ids:[row.id],base:'dhl',kind:'fixed',value:'2',serviceCode:'P'};let p=(await h.request('shipping/preview',body)).data;assert.equal(p.items[0].newPrice,2100);
+ for (const [value, expected] of [['0',1900],['-0.01',1800],['0.49',1900]]) {
+  const rounded=(await h.request('shipping/preview',{...body,value})).data;
+  assert.equal(rounded.items[0].newPrice,expected);
+ }
+ assert.equal((await h.request('state')).data.shipping.rows.find(r=>r.id===row.id).quote.products[0].price,1850);
  assert.equal((await h.request('shipping/preview',{...body,serviceCode:'X'})).status,400);
  await h.request('dhl/settings',{...dhl,password:'',environment:'test'});assert.equal(h.app.store.decrypt(h.app.store.get('dhlSettings')).password,dhl.password);
  assert.equal((await h.request('shipping/preview',body)).status,400);await h.request('shipping/quote',{id:row.id});assert.equal((await h.request('shipping/preview',body)).status,400);

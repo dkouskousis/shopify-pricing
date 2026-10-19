@@ -18,7 +18,8 @@ export function shippingUI({ $, api, action, notify, load, euros, escape, date }
     const input = $('#shipping-value').value.trim().replace(',', '.');
     if (base == null || !/^[+-]?\d+(?:\.\d{1,2})?$/.test(input)) return null;
     const value = Number(input), final = $('#shipping-kind').value === 'percent' ? Math.round(base * (1+value/100)) : base + Math.round(value*100);
-    return Number.isSafeInteger(final) && final >= 0 && final <= 100000000 ? final : null;
+    if (!Number.isSafeInteger(final) || final < 0 || final > 100000000) return null;
+    return $('#shipping-base').value === 'dhl' ? Math.round(final / 100) * 100 : final;
   }
   function conditions(row) {
     if (!row.conditions.length) return 'Χωρίς όρια';

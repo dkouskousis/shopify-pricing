@@ -191,7 +191,8 @@ export function createShippingService({ store, graphql, startJob, jobState, safe
           if (service.length !== 1) throw new Error('Η επιλεγμένη υπηρεσία DHL δεν υπάρχει μοναδικά σε όλες τις κλίμακες.');
           base = service[0].price;
         }
-        const newPrice = adjustedShippingPrice(base, input.kind, input.value);
+        const adjusted = adjustedShippingPrice(base, input.kind, input.value);
+        const newPrice = input.base === 'dhl' ? Math.round(adjusted / 100) * 100 : adjusted;
         return { id, title: `${row.profileName} / ${row.zoneName} / ${row.name}`, oldPrice: row.price, newPrice, row, fingerprint: shippingFingerprint(row) };
       }).filter(i => i.oldPrice !== i.newPrice);
       if (!items.length) throw new Error('Δεν προκύπτει αλλαγή τιμής.');
