@@ -1,3 +1,4 @@
+import { sampleDefaults } from './shipping-sample.mjs';
 export function shippingUI({ $, api, action, notify, load, euros, escape, date }) {
   let state, selected = new Set(), page = 0, sampleId = null, previewId = null, dhlDirty = false;
   const percent = n => new Intl.NumberFormat('el-GR', { maximumFractionDigits: 2 }).format(n);
@@ -82,7 +83,7 @@ export function shippingUI({ $, api, action, notify, load, euros, escape, date }
   $('#shipping-rows').addEventListener('change',e=>{const id=e.target.dataset.shippingSelect;if(!id)return;if(e.target.checked&&selected.size>=2000){e.target.checked=false;notify('Μέχρι 2.000 κλίμακες.',true);return;}e.target.checked?selected.add(id):selected.delete(id);renderRows();});
   $('#shipping-rows').addEventListener('click',e=>{
     const sample=e.target.closest('[data-shipment]'),quote=e.target.closest('[data-quote]');
-    if(sample){const r=state.shipping.rows.find(r=>r.id===sample.dataset.shipment);sampleId=r.id;const form=$('#shipment-form');form.reset();
+    if(sample){const r=state.shipping.rows.find(r=>r.id===sample.dataset.shipment);sampleId=r.id;$('#shipment-autofill-note').textContent='';const form=$('#shipment-form');form.reset();
       $('#shipment-row-label').textContent=`${r.profileName} / ${r.zoneName} / ${r.name} · ${conditions(r)}`;
       form.elements.plannedShippingDate.value=new Date().toISOString().slice(0,10);
       if(r.countries.length===1)form.elements.destinationCountryCode.value=r.countries[0].code.countryCode||'';
@@ -94,6 +95,19 @@ export function shippingUI({ $, api, action, notify, load, euros, escape, date }
       $('#shipment-dialog').showModal();
     }
     if(quote)action(quote,async()=>{await api('shipping/quote',{id:quote.dataset.quote});await load();notify('Η DHL επέστρεψε προσφορές. Επίλεξε υπηρεσία για σύγκριση.');});
+  });
+  $('#shipment-autofill').addEventListener('click', () => {
+    const row = state.shipping.rows.find(r => r.id === sampleId);
+    try {
+      const values = sampleDefaults(row, new Date().toISOString().slice(0,10));
+      const form = $('#shipment-form');
+      for (const [key, value] of Object.entries(values)) form.elements.namedItem(key).value = value;
+      const missing = [];
+      if (!values.destinationCountryCode) missing.push('Η ζώνη δεν ορίζει συγκεκριμένη χώρα: επίλεξε χώρα και πόλη.');
+      else if (!values.destinationCityName) missing.push('Συμπλήρωσε πόλη για τη συγκεκριμένη χώρα.');
+      if (!values.weight) missing.push('Η κλίμακα δεν έχει χρησιμοποιήσιμο μέγιστο βάρος: συμπλήρωσε κιλά.');
+      $('#shipment-autofill-note').textContent = missing.join(' ');
+    } catch (error) { notify(error.message, true); }
   });
   $('#shipment-close').addEventListener('click',()=>$('#shipment-dialog').close());
   $('#shipment-form').addEventListener('submit',e=>{e.preventDefault();action(e.submitter,async()=>{
