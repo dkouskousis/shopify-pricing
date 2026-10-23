@@ -6,7 +6,7 @@
   <link rel="stylesheet" href="/style.css"><script type="module" src="/app.js"></script>
 </head>
 <body>
-  <div id="notice" role="status" aria-live="polite" hidden></div>
+  <div id="notice" popover="manual" aria-label="Ειδοποιήσεις"></div>
   <main id="login" class="login" hidden>
     <div class="eyebrow">SHOPIFY PRICING</div><h1>Οι τιμές σου,<br>σε μία εικόνα.</h1>
     <p class="muted">Σύνδεση στον ιδιωτικό πίνακα διαχείρισης.</p>
@@ -96,7 +96,7 @@
           <label>Τρόπος σύνδεσης<select name="mode"><option value="client_credentials">Client ID + Client secret</option><option value="access_token">Υπάρχον Admin API access token</option></select></label>
           <div id="client-fields"><label>Client ID<input name="clientId" autocomplete="off"></label><label>Client secret<input name="clientSecret" type="password" autocomplete="new-password" placeholder="Συμπλήρωσε για αρχική αποθήκευση ή αντικατάσταση"></label></div>
           <div id="token-fields" hidden><label>Admin API access token<input name="accessToken" type="password" autocomplete="new-password" placeholder="Συμπλήρωσε για αρχική αποθήκευση ή αντικατάσταση"></label></div>
-          <p id="credentials-state" class="footnote"></p><div class="actions"><button>Αποθήκευση</button><button type="button" id="test-connection" class="quiet">Έλεγχος αποθηκευμένης σύνδεσης</button></div><p id="connection-result" role="status"></p>
+          <p id="credentials-state" class="footnote"></p><div class="actions"><button>Αποθήκευση</button><button type="button" id="test-connection" class="quiet">Έλεγχος αποθηκευμένης σύνδεσης</button></div>
         </form></div><aside class="panel"><h3>Πριν συνδεθείς</h3><ol><li>Δημιούργησε και εγκατέστησε τη δική σου εφαρμογή Shopify.</li><li>Δώσε scopes <code>read_products</code>, <code>read_inventory</code>, <code>write_products</code> και <code>write_inventory</code> και <code>read_locations</code>, καθώς και πρόσβαση στο κόστος ειδών.</li><li>Για μεταφορικά, πρόσθεσε <code>read_shipping</code> και <code>write_shipping</code>, ενημέρωσε την εγκατάσταση και βεβαιώσου ότι ο χρήστης έχει δικαίωμα διαχείρισης ρυθμίσεων αποστολής.</li><li>Για Client credentials, εφαρμογή και κατάστημα πρέπει να ανήκουν στον ίδιο οργανισμό Shopify.</li><li>Αποθήκευσε τα στοιχεία, κάνε έλεγχο και μετά συγχρονισμό.</li></ol><p class="footnote">Τα tokens Client credentials ανανεώνονται αυτόματα πριν λήξουν. Ένα access token που καταχωρείται χειροκίνητα χρειάζεται αντικατάσταση όταν λήξει ή ανακληθεί.</p><p class="footnote">API προϊόντων: <strong>2026-10</strong>. Μεταφορικά: <strong>unstable</strong>, για τη νέα δομή πολλαπλών κλιμάκων. Υποστηρίζεται βασικό νόμισμα EUR. Η μαζική εφαρμογή ενημερώνει το Price των επιλεγμένων παραλλαγών. Η επεξεργασία αγοράς ενημερώνει μόνο το Cost per item. Δεν αλλάζουν Compare-at price, φορολογικές ρυθμίσεις ή τιμοκατάλογοι Markets.</p></aside></div>
         <h3 class="spaced">DHL Express · MyDHL API</h3><div class="split"><div class="panel"><form id="dhl-form">
           <label>Περιβάλλον<select name="environment"><option value="test">Test · δοκιμαστικές τιμές</option><option value="live">Production · πραγματικός λογαριασμός</option></select></label>
@@ -119,7 +119,7 @@
         <div class="section-head"><div><h2>Ιστορικό ενημερώσεων</h2><p class="muted">Διατηρούνται οι τελευταίες 2.000 απόπειρες ενημέρωσης τιμής, κόστους, αποθέματος, βάρους ή μεταφορικών. Οι επιτυχίες και οι αποτυχίες καταγράφονται ξεχωριστά.</p></div></div>
         <div class="table-wrap"><table><thead><tr><th>Ημερομηνία</th><th>Ενέργεια</th><th>Προϊόν / Κλίμακα</th><th>SKU</th><th>Πριν</th><th>Μετά</th><th>Αποτέλεσμα</th></tr></thead><tbody id="audit-rows"></tbody></table></div>
       </section>
-    </main><footer>Shopify Pricing <span>v1.18.0 · Ιδιωτική διαχείριση τιμών</span></footer>
+    </main><footer>Shopify Pricing <span>v1.18.1 · Ιδιωτική διαχείριση τιμών</span></footer>
   </div>
   <dialog id="product-edit-dialog" aria-labelledby="product-edit-title"><div class="section-head"><h2 id="product-edit-title">Απόθεμα &amp; βάρος</h2><button id="product-edit-close" type="button" class="quiet">Κλείσιμο</button></div><p id="product-edit-label" class="muted"></p><p id="product-edit-loading" role="status" hidden>Ανάγνωση στοιχείων από το Shopify…</p>
     <form id="product-edit-form"><label>Πεδίο αλλαγής<select name="field"><option value="inventory">Απόθεμα &amp; backorder</option><option value="weight">Βάρος προϊόντος</option></select></label>

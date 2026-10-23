@@ -9,12 +9,32 @@ const pct = number => new Intl.NumberFormat('el-GR', { maximumFractionDigits: 2 
 const date = value => value ? new Date(value).toLocaleString('el-GR') : '—';
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 let state = null, selected = new Set(), page = 0, preview = null, timer = null, settingsDirty = false;
-let notificationTimer, costEdit = null, costPending = false;
+let costEdit = null, costPending = false, lastNotifiedJob = null;
 let priceEdit = null, pricePending = false, manualPreview = null;
-function notify(message, error = false) {
-  $('#notice').textContent = message; $('#notice').classList.toggle('error', error); $('#notice').hidden = false;
-  clearTimeout(notificationTimer); notificationTimer = setTimeout(() => { $('#notice').hidden = true; }, error ? 15000 : 7000);
+function placeNotifications() {
+  const host = $('#notice'), parent = [...document.querySelectorAll('dialog[open]')].at(-1) ?? document.body;
+  if (host.parentElement !== parent) {
+    if (host.matches(':popover-open')) host.hidePopover();
+    parent.append(host);
+  }
+  if (host.childElementCount && !host.matches(':popover-open')) host.showPopover();
 }
+function notify(message, error = false) {
+  placeNotifications();
+  const host = $('#notice'), item = document.createElement('div'), text = document.createElement('span'), close = document.createElement('button');
+  item.className = 'notification' + (error ? ' error' : '');
+  item.setAttribute('role', error ? 'alert' : 'status');
+  text.textContent = message;
+  close.type = 'button'; close.className = 'notification-close'; close.textContent = '×'; close.setAttribute('aria-label', 'Κλείσιμο ειδοποίησης');
+  close.addEventListener('click', () => { item.remove(); if (!host.childElementCount) host.hidePopover(); });
+  item.append(text, close); host.append(item);
+  if (!host.matches(':popover-open')) host.showPopover();
+  host.scrollTop = host.scrollHeight;
+}
+// A modal makes nodes outside it inert, so keep the notification stack inside the active editor.
+document.addEventListener('toggle', event => {
+  if (event.target instanceof HTMLDialogElement) placeNotifications();
+}, true);
 async function api(path, data) {
   const response = await fetch('/api/' + path, { method: data === undefined ? 'GET' : 'POST',
     headers: data === undefined ? {} : { 'Content-Type': 'application/json', 'X-CSRF-Token': state?.csrf ?? '' },
@@ -102,7 +122,7 @@ function authFields() {
   $('#client-fields').hidden = !clientMode; $('#token-fields').hidden = clientMode;
 }
 async function load() {
-  clearTimeout(timer); const wasRunning = state?.job.running;
+  clearTimeout(timer);
   state = await api('state');
   $('#login').hidden = true; $('#workspace').hidden = false;
   $('#shop-label').textContent = state.shopInfo?.name ?? state.settings?.shop ?? 'Ρύθμισε τη σύνδεση Shopify για να ξεκινήσεις.';
@@ -118,9 +138,11 @@ async function load() {
   const labels = { success: 'Επιτυχία', failed: 'Αποτυχία', uncertain: 'Χρειάζεται έλεγχο στο Shopify', pending: 'Σε εξέλιξη' };
   $('#audit-rows').innerHTML = state.audit.length ? state.audit.map(a => `<tr><td>${date(a.created)}</td><td>${a.kind === 'inventory' ? 'Απόθεμα / Backorder' : a.kind === 'weight' ? 'Βάρος' : a.kind === 'cost' ? 'Κόστος αγοράς' : a.kind === 'shipping_page' ? 'Πίνακας ιστοσελίδας' : a.kind === 'shipping' ? 'Μεταφορικά' : 'Τιμή πώλησης'}</td><td>${escape(a.title)}</td><td>${escape(a.sku || '—')}</td><td class="${a.old_text!==null&&a.old_text!==undefined?'audit-text':'number'}">${a.old_text!==null&&a.old_text!==undefined?escape(a.old_text):a.kind === 'shipping_page' || a.old_missing ? '—' : euros(a.old_price)}</td><td class="${a.new_text!==null&&a.new_text!==undefined?'audit-text':'number'}">${a.new_text!==null&&a.new_text!==undefined?escape(a.new_text):a.kind === 'shipping_page' ? '—' : euros(a.new_price)}</td><td class="${a.status === 'success' ? 'positive' : 'negative'}">${labels[a.status] ?? escape(a.status)}<small>${escape(a.detail)}</small></td></tr>`).join('') : '<tr><td colspan="7" class="empty">Δεν έχουν καταγραφεί αλλαγές τιμών ή κόστους.</td></tr>';
   $('#sync').disabled = state.job.running || state.job.costSaving || state.job.priceSaving;
-  $('#job').hidden = !state.job.running && !state.job.message && !state.job.error;
+  $('#job').hidden = !state.job.running;
   $('#job').textContent = state.job.running ? `${state.job.type === 'sync' ? 'Συγχρονισμός προϊόντων' : state.job.type === 'postal-refresh' ? 'Ενημέρωση χωρών & ΤΚ' : state.job.type === 'shipping-sync' ? 'Συγχρονισμός μεταφορικών' : state.job.type === 'shipping-apply' ? 'Ενημέρωση μεταφορικών' : state.job.type === 'product-preview' ? 'Προεπισκόπηση αποθέματος / βάρους' : state.job.type === 'product-apply' ? 'Ενημέρωση αποθέματος / βάρους' : state.job.type === 'manual' ? 'Μαζική επεξεργασία προϊόντων' : 'Ενημέρωση τιμών'}: ${state.job.completed}${state.job.total ? ' / ' + state.job.total : ''}…` : state.job.error || state.job.message;
-  if (wasRunning && !state.job.running) notify(state.job.error || state.job.message, Boolean(state.job.error));
+  if (!state.job.running && state.job.id !== lastNotifiedJob && (state.job.error || state.job.message)) {
+    lastNotifiedJob = state.job.id; notify(state.job.error || state.job.message, Boolean(state.job.error));
+  }
   if (state.job.running) timer = setTimeout(() => load().catch(e => notify(e.message, true)), 2000);
 }
 
@@ -326,10 +348,10 @@ $('#settings-form').addEventListener('input', () => { settingsDirty = true; auth
 $('#settings-form').addEventListener('submit', event => { event.preventDefault(); action(event.submitter, async () => {
   await api('settings', Object.fromEntries(new FormData(event.target))); settingsDirty = false;
   event.target.elements.clientSecret.value = ''; event.target.elements.accessToken.value = '';
-  $('#connection-result').textContent = ''; await load(); notify('Τα στοιχεία αποθηκεύτηκαν. Κάνε έλεγχο σύνδεσης.');
+  await load(); notify('Τα στοιχεία αποθηκεύτηκαν. Κάνε έλεγχο σύνδεσης.');
 }); });
 $('#test-connection').addEventListener('click', event => action(event.currentTarget, async () => {
-  const result = await api('settings/test', {}); $('#connection-result').textContent = `Επιτυχής σύνδεση: ${result.shop.name} · ${result.shop.currencyCode}`;
+  const result = await api('settings/test', {}); notify(`Επιτυχής σύνδεση: ${result.shop.name} · ${result.shop.currencyCode}`);
 }));
 const shipping = shippingUI({ $, api, action, notify, load, euros, escape, date });
 const postal = postalUI({ $, api, action, notify, load, escape, date });

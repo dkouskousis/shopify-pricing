@@ -386,3 +386,7 @@ docker compose -f docker-compose.yml -f compose.build.yml up -d --build
 **Δικαιώματα:** `read_products`, `write_products`, `read_inventory`, `write_inventory` και επιπλέον **`read_locations`**, με τα αντίστοιχα δικαιώματα χρήστη Shopify. Πρόσθεσε το νέο scope και ενημέρωσε την εγκατάσταση της Shopify εφαρμογής πριν χρησιμοποιήσεις τις νέες λειτουργίες. Δεν απαιτείται `write_locations`.
 
 Αναφορές API: [Inventory quantities](https://shopify.dev/docs/api/admin-graphql/2026-10/mutations/inventorySetQuantities), [Inventory item](https://shopify.dev/docs/api/admin-graphql/2026-10/mutations/inventoryItemUpdate), [Inventory activation](https://shopify.dev/docs/api/admin-graphql/2026-10/mutations/inventoryActivate), [Variant updates](https://shopify.dev/docs/api/admin-graphql/2026-10/mutations/productVariantsBulkUpdate).
+
+### Ειδοποιήσεις (v1.18.1)
+
+Όλα τα μηνύματα ολοκλήρωσης και τα σφάλματα εμφανίζονται κάτω δεξιά, σε ξεχωριστές ειδοποιήσεις με κουμπί ×. Δεν κλείνουν αυτόματα και μια νέα ειδοποίηση δεν αντικαθιστά τις προηγούμενες. Η στοίβα κυλά όταν υπάρχουν πολλά μηνύματα και παραμένει προσβάσιμη πάνω από τα παράθυρα επεξεργασίας. Η πρόοδος ενεργής εργασίας εμφανίζεται στην επάνω ένδειξη όσο εκτελείται· το αποτέλεσμα εμφανίζεται στις ειδοποιήσεις.

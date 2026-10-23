@@ -51,7 +51,7 @@ export function createApplication(config, dependencies = {}) {
   const authMarker = createHmac('sha256', Buffer.from(config.encryptionKey, 'hex')).update(config.password).digest('hex');
   if (store.get('authMarker') !== authMarker) { db.exec('DELETE FROM sessions'); store.put('authMarker', authMarker); }
   const makeShopify = dependencies.makeShopify ?? createShopify;
-  let client = null, shuttingDown = false, costSaving = false, priceSaving = false, job = { running: false, type: null, completed: 0, total: 0, message: '', error: null };
+  let client = null, shuttingDown = false, costSaving = false, priceSaving = false, job = { id: null, running: false, type: null, completed: 0, total: 0, message: '', error: null };
   const attempts = new Map();
   const cookie = (value, maxAge) => `pricing_session=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${appUrl.protocol === 'https:' ? '; Secure' : ''}`;
   function graphql() {
@@ -67,7 +67,7 @@ export function createApplication(config, dependencies = {}) {
   }
   function startJob(type, work) {
     if (job.running) fail('Εκτελείται ήδη εργασία.', 409);
-    job = { running: true, type, completed: 0, total: 0, message: '', error: null };
+    job = { id: random(), running: true, type, completed: 0, total: 0, message: '', error: null };
     Promise.resolve().then(work).catch(error => { job.error = safeError(error); }).finally(() => { job.running = false; });
   }
   function resultFor(v) {
