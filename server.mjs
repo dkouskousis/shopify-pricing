@@ -1,4 +1,6 @@
 import http from 'node:http';
+import { columnPreferences } from './public/product-columns.mjs';
+import { createProductDelete } from './product-delete.mjs';
 import { createProductEdit, inventoryFields } from './product-edit.mjs';
 import { randomBytes, scryptSync, timingSafeEqual, createHash, createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -236,6 +238,7 @@ export function createApplication(config, dependencies = {}) {
     job.message = `Μαζική αλλαγή ${plan.field === 'cost' ? 'κόστους' : 'τιμής πώλησης'}: ${success} ενημερώθηκαν, ${failed} χρειάζονται έλεγχο. Δες το ιστορικό.${shuttingDown ? ' Η εργασία διακόπηκε λόγω επανεκκίνησης.' : ''}`;
   }
 
+  const productDelete = createProductDelete({store,graphql,startJob,jobState:()=>job,safeError,stopping:()=>shuttingDown,invalidate,pause:dependencies.deletePause});
   const productEdit = createProductEdit({store,graphql,startJob,jobState:()=>job,safeError,stopping:()=>shuttingDown,invalidate});
   const shipping = createShippingService({ store, graphql, startJob, jobState: () => job, safeError, stopping: () => shuttingDown, makeDhl: dependencies.makeDhl, postalFetch: dependencies.postalFetch });
   const server = http.createServer(async (req, res) => {
@@ -277,11 +280,16 @@ export function createApplication(config, dependencies = {}) {
           return json({ csrf: session.csrf, job: { ...job, costSaving, priceSaving }, lastSync: store.get('lastSync'), shopInfo: store.get('shopInfo'),
             settings: s ? { shop: s.shop, mode: s.mode, clientId: s.clientId, hasClientSecret: Boolean(s.clientSecret), hasAccessToken: Boolean(s.accessToken) } : null,
             shipping: shipping.state(), rules: store.rules(), collections: store.get('collections'), vendors: [...new Set(store.variants().map(v => v.vendor))].sort(),
-            products: store.variants().map(resultFor), audit: db.prepare('SELECT * FROM audit ORDER BY id DESC LIMIT 2000').all() });
+            productColumns: columnPreferences(store.get('productColumns')), products: store.variants().map(resultFor), audit: db.prepare('SELECT * FROM audit ORDER BY id DESC LIMIT 2000').all() });
         }
         if (req.method !== 'POST') fail('Δεν βρέθηκε.', 404);
         const input = await body(req);
+        if (url.pathname === '/api/preferences/products') { store.put('productColumns', columnPreferences(input)); return json({ok:true}); }
         if (job.running || costSaving || priceSaving || shuttingDown) fail('Περίμενε να ολοκληρωθεί η τρέχουσα εργασία.', 409);
+        if (url.pathname.startsWith('/api/product-delete/')) {
+          priceSaving=true;
+          try { return json(await productDelete.handle(url.pathname,input)); } finally { priceSaving=false; }
+        }
         if (url.pathname.startsWith('/api/product-edit/')) {
           priceSaving=true;
           try { return json(await productEdit.handle(url.pathname,input)); } finally { priceSaving=false; }
@@ -373,7 +381,7 @@ export function createApplication(config, dependencies = {}) {
         }
         fail('Δεν βρέθηκε.', 404);
       }
-      const paths = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/shipping-ui.mjs': ['shipping-ui.mjs', 'text/javascript'], '/product-edit-ui.mjs': ['product-edit-ui.mjs', 'text/javascript'], '/shipping-table-ui.mjs': ['shipping-table-ui.mjs', 'text/javascript'], '/shipping-summary.mjs': ['shipping-summary.mjs', 'text/javascript'], '/postal-ui.mjs': ['postal-ui.mjs', 'text/javascript'], '/shipping-sample.mjs': ['shipping-sample.mjs', 'text/javascript'], '/product-filters.mjs': ['product-filters.mjs', 'text/javascript'], '/pricing.mjs': ['pricing.mjs', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
+      const paths = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/shipping-ui.mjs': ['shipping-ui.mjs', 'text/javascript'], '/product-edit-ui.mjs': ['product-edit-ui.mjs', 'text/javascript'], '/product-columns.mjs': ['product-columns.mjs', 'text/javascript'], '/product-columns-ui.mjs': ['product-columns-ui.mjs', 'text/javascript'], '/product-delete-ui.mjs': ['product-delete-ui.mjs', 'text/javascript'], '/shipping-table-ui.mjs': ['shipping-table-ui.mjs', 'text/javascript'], '/shipping-summary.mjs': ['shipping-summary.mjs', 'text/javascript'], '/postal-ui.mjs': ['postal-ui.mjs', 'text/javascript'], '/shipping-sample.mjs': ['shipping-sample.mjs', 'text/javascript'], '/product-filters.mjs': ['product-filters.mjs', 'text/javascript'], '/pricing.mjs': ['pricing.mjs', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
       if (req.method === 'GET' && paths[url.pathname]) {
         const [file, type] = paths[url.pathname];
         res.writeHead(200, { ...headers, 'Content-Type': `${type}; charset=utf-8` });

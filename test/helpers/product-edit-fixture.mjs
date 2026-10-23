@@ -11,15 +11,33 @@ export async function productHarness(t,count=2,port=0) {
     inventoryItem:{id:`gid://shopify/InventoryItem/${i+1}`,sku:`TEST-${i+1}`,tracked:true,measurement:{weight:{unit:'GRAMS',value:1250}},unitCost:{amount:'60.00',currencyCode:'EUR'}},
     product:{id:'gid://shopify/Product/1',title:'Luxury bed '+(i+1),vendor:'MiaCara',status:'ACTIVE'},
     levels:[{locationId:locationId(1),active:true,available:3,committed:2,onHand:5},{locationId:locationId(2),active:true,available:5,committed:0,onHand:5}]}));
-  const calls=[],writes=[],keys=new Set(),controls={};
+  const calls=[],writes=[],keys=new Set(),controls={},deleted=new Set(),deletions=new Map();
   const total=v=>v.levels.filter(l=>l.active).reduce((n,l)=>n+l.available,0);
   function view(v){return {...structuredClone(v),inventoryQuantity:total(v)};}
   const api=async(query,vars={})=>{
     calls.push({query,vars:structuredClone(vars)});
     if(query.includes('ShopInfo'))return {shop:{name:'Inventory test',myshopifyDomain:'example.myshopify.com',currencyCode:'EUR'}};
-    if(query.includes('PricingVariants'))return {productVariants:{nodes:variants.map(view),pageInfo:info}};
+    if(query.includes('PricingVariants'))return {productVariants:{nodes:variants.filter(v=>!deleted.has(v.product.id)).map(view),pageInfo:info}};
     if(query.includes('PricingCollections'))return {collections:{nodes:[],pageInfo:info}};
     if(query.includes('PricingMemberships'))return {nodes:vars.ids.map(id=>({id,collections:{nodes:[],pageInfo:info}}))};
+    if(query.includes('ProductDeleteDetails')){
+      const group=variants.filter(v=>v.product.id===vars.id);
+      return {product:group.length&&(!deleted.has(vars.id)||controls.keepDeletedProduct)?{id:vars.id,title:group[0].product.title,updatedAt:controls.productUpdatedAt??'2026-10-23T10:00:00Z',variantsCount:{count:group.length,precision:'EXACT'}}:null};
+    }
+    if(query.includes('DeleteCatalogProduct')){
+      writes.push({query,vars:structuredClone(vars)});
+      if(controls.deleteDenied)return{productDelete:{productDeleteOperation:null,userErrors:[{message:'Delete permission denied'}]}};
+      const id='gid://shopify/ProductDeleteOperation/'+(deletions.size+1);deletions.set(id,{productId:vars.input.id,polls:0});
+      if(controls.deleteNetwork)throw new Error('Delete network timeout');
+      return {productDelete:{productDeleteOperation:{id},userErrors:[]}};
+    }
+    if(query.includes('ProductDeletionStatus')){
+      if(controls.deleteWait)await controls.deleteWait;
+      const op=deletions.get(vars.id);op.polls++;
+      if(op.polls<=(controls.deletePendingPolls??0))return{productOperation:{id:vars.id,status:'ACTIVE',deletedProductId:null,userErrors:[]}};
+      const errors=controls.deleteErrors??[];if(!errors.length)deleted.add(op.productId);
+      return {productOperation:{id:vars.id,status:'COMPLETE',deletedProductId:controls.wrongDeletedId??op.productId,userErrors:errors}};
+    }
     if(query.includes('ProductEditLocations')){
       const i=vars.after?Number(vars.after):0;return {locations:{nodes:locations.slice(i,i+2),pageInfo:{hasNextPage:i+2<locations.length,endCursor:String(i+2)}}};
     }
@@ -54,7 +72,7 @@ export async function productHarness(t,count=2,port=0) {
     }
     throw new Error('Unexpected query');
   };
-  const app=createApplication(config,{makeShopify:()=>api});
+  const app=createApplication(config,{makeShopify:()=>api,deletePause:async()=>{}});
   app.store.saveSettings({shop:'example.myshopify.com',mode:'access_token',accessToken:'mock'});
   for(const v of variants)app.store.db.prepare('INSERT INTO variants VALUES (?,?)').run(v.id,JSON.stringify({id:v.id,productId:v.product.id,title:v.product.title,variant:v.title,vendor:v.product.vendor,status:v.product.status,sku:v.inventoryItem.sku,price:10000,cost:6000,currency:'EUR',taxable:true,compareAt:null,collectionIds:[],...inventoryFields(view(v))}));
   await new Promise(resolve=>app.server.listen(port,'127.0.0.1',resolve));t?.after(()=>app.close());
@@ -63,5 +81,5 @@ export async function productHarness(t,count=2,port=0) {
   await request('login',{password:config.password});csrf=(await request('state')).data.csrf;
   async function idle(){for(let i=0;i<1000;i++){const state=(await request('state')).data;if(!state.job.running)return state;await new Promise(r=>setTimeout(r,2));}throw new Error('Timed out');}
   async function save(field,data,ids=variants.map(v=>v.id),extra={}){const r=await request('product-edit/save',{requestId:randomUUID(),field,data,ids,...extra});if(r.status!==200)throw new Error(r.data.error);return idle();}
-  return {app,config,base,request,idle,save,variants,locations,calls,writes,controls};
+  return {app,config,base,request,idle,save,variants,locations,calls,writes,controls,deleted,deletions};
 }
