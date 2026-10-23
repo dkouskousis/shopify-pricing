@@ -1,5 +1,5 @@
 export function productEditUI({$,api,action,load,escape,notify,selection}) {
-  let state,ids=[],details=null,pending=false,waiting=false,shown=null;
+  let state,ids=[],details=null,pending=false;
   const form=$('#product-edit-form');
   const decimal=n=>n===null||n===undefined?'—':new Intl.NumberFormat('el-GR',{maximumFractionDigits:6}).format(n);
   const field=()=>form.elements.field.value;
@@ -10,6 +10,7 @@ export function productEditUI({$,api,action,load,escape,notify,selection}) {
     $('#edit-location-table').hidden=!single;$('#edit-bulk-quantity').hidden=single;
     $('#edit-weight-current').textContent=single?'Τωρινό βάρος: '+decimal(details.snapshot.weightKg)+' kg':'';
     for(const e of form.querySelectorAll('input,select'))if(e.name!=='field')e.disabled=pending||e.dataset.unavailable==='true'||Boolean(e.closest('[hidden]'));
+    form.elements.field.disabled=pending||ids.length===1;
     $('#product-edit-close').disabled=pending;
   }
   function locations(options){
@@ -22,12 +23,12 @@ export function productEditUI({$,api,action,load,escape,notify,selection}) {
     }).join('');
   }
   async function open(nextIds,nextField) {
-    ids=nextIds;details=null;shown=null;form.reset();form.elements.field.value=nextField;form.elements.field.disabled=ids.length===1;
+    ids=nextIds;details=null;form.reset();form.elements.field.value=nextField;form.elements.field.disabled=ids.length===1;
     const product=ids.length===1?state.products.find(p=>p.id===ids[0]):null;
     $('#product-edit-label').textContent=product?`${product.title} / ${product.variant} · SKU: ${product.sku||'—'}`:`${ids.length} επιλεγμένες παραλλαγές`;
     pending=true;fields();$('#product-edit-dialog').showModal();$('#product-edit-submit').disabled=true;$('#product-edit-loading').hidden=false;
     try {
-      if(ids.length===1){details=await api('product-edit/details',{id:ids[0]});$('#edit-tracked').checked=details.snapshot.tracked;$('#edit-backorder').checked=details.snapshot.inventoryPolicy==='CONTINUE';form.elements.weightValue.value=details.snapshot.weightKg===null?'':String(details.snapshot.weightKg);locations(details.locations);}
+      if(ids.length===1){details=await api('product-edit/details',{id:ids[0],field:nextField});$('#edit-tracked').checked=details.snapshot.tracked;$('#edit-backorder').checked=details.snapshot.inventoryPolicy==='CONTINUE';form.elements.weightValue.value=details.snapshot.weightKg===null?'':String(details.snapshot.weightKg);locations(details.locations);}
       else {const result=await api('product-edit/options',{});locations(result.locations);}
     }catch(error){$('#product-edit-dialog').close();throw error;}
     finally{pending=false;$('#product-edit-loading').hidden=true;fields();$('#product-edit-submit').disabled=false;}
@@ -47,26 +48,11 @@ export function productEditUI({$,api,action,load,escape,notify,selection}) {
       data={tracked:tracked===''?null:tracked==='true',policy:policy||null,quantities:locationId?[{locationId,mode:form.elements.quantityMode.value,value}]:[]};
     }
     pending=true;fields();
-    try{await api('product-edit/preview',{ids,field:field(),data,...(details?{expected:details.fingerprints[field()]}:{})});waiting=true;$('#product-edit-dialog').close();await load();}
+    try{await api('product-edit/save',{requestId:crypto.randomUUID(),ids,field:field(),data,...(details?{expected:details.fingerprints[field()]}:{})});$('#product-edit-dialog').close();await load();}
     finally{pending=false;fields();}
   });});
-  $('#product-edit-preview-close').addEventListener('click',()=>$('#product-edit-preview-dialog').close());
-  $('#product-edit-apply').addEventListener('click',event=>action(event.currentTarget,async()=>{
-    if(!state.productEdit||pending)return;pending=true;$('#product-edit-preview-close').disabled=true;
-    try{await api('product-edit/apply',{id:state.productEdit.id});$('#product-edit-preview-dialog').close();await load();}
-    finally{pending=false;$('#product-edit-preview-close').disabled=false;}
-  }));
-  $('#product-edit-preview-dialog').addEventListener('cancel',e=>{if(pending)e.preventDefault();});
   function render(next){
     state=next;$('#bulk-product-edit').hidden=$('#selection-purpose').value!=='manual';$('#bulk-product-edit').disabled=!selection().length||state.job.running||state.job.priceSaving||state.job.costSaving;
-    const plan=state.productEdit;
-    if(waiting&&!state.job.running){waiting=false;if(state.job.error)return;}
-    if(!plan||plan.id===shown||state.job.running)return;
-    shown=plan.id;const valid=plan.items.filter(i=>i.changed&&!i.error),errors=plan.items.filter(i=>i.error);
-    $('#product-edit-preview-title').textContent=plan.field==='weight'?'Προεπισκόπηση βάρους':'Προεπισκόπηση αποθέματος';
-    $('#product-edit-preview-note').textContent=`${valid.length} αλλαγές · ${errors.length} με σφάλμα · ${plan.items.length-valid.length-errors.length} χωρίς αλλαγή. Τα σφάλματα εξαιρούνται από την εφαρμογή.`;
-    $('#product-edit-preview-rows').innerHTML=plan.items.map(i=>`<tr><td>${escape(i.title)}<small>${escape(i.sku)}</small></td><td>${escape(i.oldText??'—')}</td><td>${i.error?`<span class="negative">${escape(i.error)}</span>`:escape(i.newText)}</td><td>${i.error?'Σφάλμα':i.changed?'Θα ενημερωθεί':'Ίδιο'}</td></tr>`).join('');
-    $('#product-edit-apply').disabled=!valid.length;$('#product-edit-preview-dialog').showModal();
   }
-  return{render,selectionChanged(){if(!state)return;$('#bulk-product-edit').hidden=$('#selection-purpose').value!=='manual';$('#bulk-product-edit').disabled=!selection().length||state.job.running||state.job.priceSaving||state.job.costSaving;},reset(){state=null;details=null;ids=[];shown=null;waiting=false;$('#product-edit-dialog').close();$('#product-edit-preview-dialog').close();}};
+  return{render,selectionChanged(){if(!state)return;$('#bulk-product-edit').hidden=$('#selection-purpose').value!=='manual';$('#bulk-product-edit').disabled=!selection().length||state.job.running||state.job.priceSaving||state.job.costSaving;},reset(){state=null;details=null;ids=[];$('#product-edit-dialog').close();}};
 }

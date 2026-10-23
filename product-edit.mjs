@@ -1,4 +1,4 @@
-import {createHash,randomUUID,randomBytes} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 const factors={KILOGRAMS:1,GRAMS:.001,POUNDS:.45359237,OUNCES:.028349523125};
 export function inventoryFields(v) {
   const w=v.inventoryItem.measurement?.weight;
@@ -45,7 +45,7 @@ export function describeEdit(s,field,locations=[]) {
   return `${s.tracked?'Παρακολούθηση: ναι':'Παρακολούθηση: όχι'} · Backorder: ${s.inventoryPolicy==='CONTINUE'?'ναι':'όχι'}${s.tracked?' · '+s.levels.filter(l=>l.active).map(l=>`${names.get(l.locationId)??l.name}: ${l.available}`).join(' / '):''}`;
 }
 export function createProductEdit({store,graphql,startJob,jobState,safeError,stopping,invalidate}) {
-  let plan=null;const db=store.db;
+  const db=store.db;
   async function locations(){return pages(async after=>(await graphql()(EDIT_QUERIES.locations,{after})).locations);}
   async function snapshot(id,field='inventory') {
     const v=(await graphql()(EDIT_QUERIES.variant,{id})).productVariant;
@@ -58,16 +58,10 @@ export function createProductEdit({store,graphql,startJob,jobState,safeError,sto
     }
     return result;
   }
-  function state(){if(plan&&plan.expires<Date.now())plan=null;return plan?{id:plan.id,expires:plan.expires,field:plan.field,items:plan.items.map(({before,after,...item})=>item)}:null;}
-  async function preview(input) {
-    const locs=input.field==='inventory'?await locations():[],active=new Set(locs.filter(l=>l.isActive).map(l=>l.id));
-    const items=[];jobState().total=input.ids.length;
-    for(const id of input.ids){if(stopping())throw new Error('Η προεπισκόπηση διακόπηκε.');const cached=store.variant(id);let item={id,title:cached?`${cached.title} / ${cached.variant}`:id,sku:cached?.sku??''};
-      try{
-        if(!cached)throw new Error('Δεν βρέθηκε η παραλλαγή.');const before=await snapshot(id,input.field);
+  function prepare(input,cached,before,locs) {
         if(before.productId!==cached.productId)throw new Error('Η παραλλαγή άλλαξε προϊόν.');
-        const fingerprint=editFingerprint(before,input.field);
-        if(input.expected&&input.expected!==fingerprint)throw new Error('Τα στοιχεία άλλαξαν στο Shopify. Άνοιξε ξανά την επεξεργασία.');
+        if(input.expected&&input.expected!==editFingerprint(before,input.field))throw new Error('Τα στοιχεία άλλαξαν στο Shopify. Άνοιξε ξανά την επεξεργασία.');
+        const active=new Set(locs.filter(l=>l.isActive).map(l=>l.id));
         const after=structuredClone(before),data=input.data;
         if(input.field==='weight')after.weightKg=changedWeight(before.weightKg,data.mode,data.value);
         else {
@@ -80,26 +74,26 @@ export function createProductEdit({store,graphql,startJob,jobState,safeError,sto
             }else{if(q.mode!=='set'&&(!before.tracked||level.available===null))throw new Error('Δεν υπάρχει παρακολουθούμενη ποσότητα για προσαρμογή. Χρησιμοποίησε ορισμό ποσότητας.');level.available=integer(q.mode==='set'?q.value:level.available+integer(q.value));}
           }
         }
-        item={...item,before,after,fingerprint,oldText:describeEdit(before,input.field,locs),newText:describeEdit(after,input.field,locs),changed:editFingerprint(before,input.field)!==editFingerprint(after,input.field)};
-      }catch(error){item.error=safeError(error);}
-      items.push(item);jobState().completed++;
-    }
-    plan={id:randomBytes(24).toString('hex'),expires:Date.now()+15*60000,field:input.field,items,locations:locs};
-    jobState().message='Η προεπισκόπηση είναι έτοιμη. Έλεγξε τις αλλαγές πριν τις εφαρμόσεις.';
+        return {before,after,oldText:describeEdit(before,input.field,locs),newText:describeEdit(after,input.field,locs),changed:editFingerprint(before,input.field)!==editFingerprint(after,input.field)};
   }
   function cache(s){const v=store.variant(s.id);db.prepare('UPDATE variants SET data=? WHERE id=?').run(JSON.stringify({...v,inventoryItemId:s.inventoryItemId,inventoryQuantity:s.inventoryQuantity,tracked:s.tracked,inventoryPolicy:s.inventoryPolicy,weightKg:s.weightKg}),s.id);}
-  async function apply(p) {
-    const items=p.items.filter(i=>i.changed&&!i.error);jobState().total=items.length;let success=0,failed=0;
-    for(const item of items){if(stopping())break;
-      const audit=db.prepare('INSERT INTO audit(created,variant_id,title,old_price,new_price,status,detail,kind,sku,old_text,new_text) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(new Date().toISOString(),item.id,item.title,0,0,'pending','',p.field,item.sku,item.oldText,item.newText);
+  async function save(input) {
+    const locs=input.field==='inventory'&&input.data.quantities.length?await locations():[];
+    jobState().total=input.ids.length;let success=0,failed=0,unchanged=0;
+    for(const id of input.ids){if(stopping())break;
+      const cached=store.variant(id),title=cached?`${cached.title} / ${cached.variant}`:id;
+      let item,audit;
       let sending=false,written=false;
       async function mutate(query,variables,payloadName){sending=true;const result=(await graphql()(query,variables))[payloadName];if(result.userErrors.length){sending=false;throw new Error(result.userErrors.map(e=>e.message).join('; '));}written=true;sending=false;}
       try{
-        let fresh=await snapshot(item.id,p.field);
-        if(editFingerprint(fresh,p.field)!==item.fingerprint)throw new Error('Τα στοιχεία άλλαξαν στο Shopify μετά την προεπισκόπηση. Κάνε νέα προεπισκόπηση.');
-        if(p.field==='weight')await mutate(EDIT_QUERIES.item,{id:fresh.inventoryItemId,input:{measurement:{weight:{unit:'KILOGRAMS',value:item.after.weightKg}}}},'inventoryItemUpdate');
+        if(!cached)throw new Error('Δεν βρέθηκε η παραλλαγή.');
+        let fresh=await snapshot(id,input.field);
+        item={id,...prepare(input,cached,fresh,locs)};
+        if(!item.changed){cache(fresh);unchanged++;jobState().completed++;continue;}
+        audit=db.prepare('INSERT INTO audit(created,variant_id,title,old_price,new_price,status,detail,kind,sku,old_text,new_text) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(new Date().toISOString(),id,title,0,0,'pending','',input.field,cached.sku||'',item.oldText,item.newText);
+        if(input.field==='weight')await mutate(EDIT_QUERIES.item,{id:fresh.inventoryItemId,input:{measurement:{weight:{unit:'KILOGRAMS',value:item.after.weightKg}}}},'inventoryItemUpdate');
         else {
-          const before=item.before,after=item.after,locs=await locations();
+          const before=item.before,after=item.after;
           const changed=after.levels.filter(l=>{const old=before.levels.find(o=>o.locationId===l.locationId);return l.active&&(!old?.active||l.available!==old.available);});
           if(changed.some(l=>!locs.some(x=>x.id===l.locationId&&x.isActive)))throw new Error('Κάποια αποθήκη απενεργοποιήθηκε.');
           if(!before.tracked&&after.tracked){await mutate(EDIT_QUERIES.item,{id:fresh.inventoryItemId,input:{tracked:true}},'inventoryItemUpdate');fresh=await snapshot(item.id);}
@@ -112,20 +106,35 @@ export function createProductEdit({store,graphql,startJob,jobState,safeError,sto
           if(before.inventoryPolicy!==after.inventoryPolicy)await mutate(EDIT_QUERIES.policy,{productId:fresh.productId,variants:[{id:item.id,inventoryPolicy:after.inventoryPolicy}]},'productVariantsBulkUpdate');
           if(before.tracked&&!after.tracked)await mutate(EDIT_QUERIES.item,{id:fresh.inventoryItemId,input:{tracked:false}},'inventoryItemUpdate');
         }
-        const confirmed=await snapshot(item.id,p.field);
-        if(p.field==='weight'?confirmed.weightKg===null||Math.abs(confirmed.weightKg-item.after.weightKg)>1e-8:confirmed.tracked!==item.after.tracked||confirmed.inventoryPolicy!==item.after.inventoryPolicy||item.after.tracked&&item.after.levels.some(l=>{const old=item.before.levels.find(o=>o.locationId===l.locationId);if(!l.active||old?.active&&old.available===l.available)return false;const c=confirmed.levels.find(c=>c.locationId===l.locationId);return!c?.active||c.available!==l.available;}))throw new Error('Δεν επιβεβαιώθηκαν όλες οι αλλαγές. Συγχρόνισε και έλεγξε το Shopify.');
+        const confirmed=await snapshot(item.id,input.field);
+        if(input.field==='weight'?confirmed.weightKg===null||Math.abs(confirmed.weightKg-item.after.weightKg)>1e-8:confirmed.tracked!==item.after.tracked||confirmed.inventoryPolicy!==item.after.inventoryPolicy||item.after.tracked&&item.after.levels.some(l=>{const old=item.before.levels.find(o=>o.locationId===l.locationId);if(!l.active||old?.active&&old.available===l.available)return false;const c=confirmed.levels.find(c=>c.locationId===l.locationId);return!c?.active||c.available!==l.available;}))throw new Error('Δεν επιβεβαιώθηκαν όλες οι αλλαγές. Συγχρόνισε και έλεγξε το Shopify.');
         cache(confirmed);db.prepare("UPDATE audit SET status='success',detail='Επιβεβαιώθηκε στο Shopify' WHERE id=?").run(audit.lastInsertRowid);success++;
-      }catch(error){failed++;db.prepare('UPDATE audit SET status=?,detail=? WHERE id=?').run(sending||written?'uncertain':'failed',(written?'Έχουν προηγηθεί εγγραφές· έλεγξε τυχόν μερική ενημέρωση. ':'')+safeError(error),audit.lastInsertRowid);}
+      }catch(error){
+        failed++;const status=sending||written?'uncertain':'failed',detail=(written?'Έχουν προηγηθεί εγγραφές· έλεγξε τυχόν μερική ενημέρωση. ':'')+safeError(error);
+        if(audit)db.prepare('UPDATE audit SET status=?,detail=? WHERE id=?').run(status,detail,audit.lastInsertRowid);
+        else db.prepare('INSERT INTO audit(created,variant_id,title,old_price,new_price,status,detail,kind,sku,old_text,new_text) VALUES (?,?,?,?,?,?,?,?,?,\'—\',\'—\')').run(new Date().toISOString(),id,title,0,0,status,detail,input.field,cached?.sku||'');
+      }
       jobState().completed++;invalidate();
     }
-    jobState().message=`${success} ενημερώθηκαν, ${failed} χρειάζονται έλεγχο στο ιστορικό.${stopping()?' Η εργασία διακόπηκε.':''}`;
+    jobState().message=`${success} ενημερώθηκαν, ${unchanged} χωρίς αλλαγή, ${failed} χρειάζονται έλεγχο στο ιστορικό.${stopping()?' Η εργασία διακόπηκε.':''}`;
   }
   async function handle(path,input){
     if(path==='/api/product-edit/options')return {locations:await locations()};
-    if(path==='/api/product-edit/details'){const cached=store.variant(input.id);if(!cached)throw new Error('Δεν βρέθηκε η παραλλαγή.');const s=await snapshot(input.id);if(s.productId!==cached.productId)throw new Error('Η παραλλαγή άλλαξε προϊόν.');return {snapshot:s,locations:await locations(),fingerprints:{inventory:editFingerprint(s,'inventory'),weight:editFingerprint(s,'weight')}};}
-    if(path==='/api/product-edit/preview'){validate(input);plan=null;startJob('product-preview',()=>preview(input));return {ok:true};}
-    if(path==='/api/product-edit/apply'){if(!plan||plan.id!==input.id||plan.expires<Date.now())throw new Error('Η προεπισκόπηση έληξε ή χρησιμοποιήθηκε.');if(!plan.items.some(i=>i.changed&&!i.error))throw new Error('Δεν υπάρχουν αλλαγές για εφαρμογή.');const p=plan;plan=null;startJob('product-apply',()=>apply(p));return {ok:true};}
+    if(path==='/api/product-edit/details'){
+      if(!['inventory','weight'].includes(input.field))throw new Error('Επίλεξε απόθεμα ή βάρος.');
+      const cached=store.variant(input.id);if(!cached)throw new Error('Δεν βρέθηκε η παραλλαγή.');
+      const s=await snapshot(input.id,input.field);if(s.productId!==cached.productId)throw new Error('Η παραλλαγή άλλαξε προϊόν.');
+      return {snapshot:s,locations:input.field==='inventory'?await locations():[],fingerprints:{[input.field]:editFingerprint(s,input.field)}};
+    }
+    if(path==='/api/product-edit/save'){
+      validate(input);
+      if(typeof input.requestId!=='string'||!(/^[a-f0-9-]{36}$/i).test(input.requestId))throw new Error('Μη έγκυρος κωδικός αιτήματος.');
+      const recent=(store.get('productEditRequests')??[]).filter(r=>r.at>Date.now()-86400000),fingerprint=hash(input),previous=recent.find(r=>r.id===input.requestId);
+      if(previous){if(previous.fingerprint!==fingerprint)throw new Error('Ο κωδικός αιτήματος χρησιμοποιήθηκε με άλλα στοιχεία.');return {ok:true,duplicate:true};}
+      store.put('productEditRequests',[...recent,{id:input.requestId,at:Date.now(),fingerprint}]);
+      startJob('product-apply',()=>save(input));return {ok:true};
+    }
     throw new Error('Άγνωστη ενέργεια προϊόντων.');
   }
-  return {state,handle};
+  return {handle};
 }

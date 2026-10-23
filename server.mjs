@@ -276,7 +276,7 @@ export function createApplication(config, dependencies = {}) {
           const s = store.settings();
           return json({ csrf: session.csrf, job: { ...job, costSaving, priceSaving }, lastSync: store.get('lastSync'), shopInfo: store.get('shopInfo'),
             settings: s ? { shop: s.shop, mode: s.mode, clientId: s.clientId, hasClientSecret: Boolean(s.clientSecret), hasAccessToken: Boolean(s.accessToken) } : null,
-            productEdit: productEdit.state(), shipping: shipping.state(), rules: store.rules(), collections: store.get('collections'), vendors: [...new Set(store.variants().map(v => v.vendor))].sort(),
+            shipping: shipping.state(), rules: store.rules(), collections: store.get('collections'), vendors: [...new Set(store.variants().map(v => v.vendor))].sort(),
             products: store.variants().map(resultFor), audit: db.prepare('SELECT * FROM audit ORDER BY id DESC LIMIT 2000').all() });
         }
         if (req.method !== 'POST') fail('Δεν βρέθηκε.', 404);

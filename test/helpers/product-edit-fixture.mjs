@@ -1,3 +1,4 @@
+import {randomUUID} from 'node:crypto';
 import {createApplication} from '../../server.mjs';
 import {inventoryFields} from '../../product-edit.mjs';
 export const variantId=n=>`gid://shopify/ProductVariant/${n}`;
@@ -61,7 +62,6 @@ export async function productHarness(t,count=2,port=0) {
   async function request(path,input,headers={}){const response=await fetch(base+'/api/'+path,{method:input===undefined?'GET':'POST',headers:{Origin:config.appUrl,Cookie:cookie,'Content-Type':'application/json','X-CSRF-Token':csrf,...headers},body:input===undefined?undefined:JSON.stringify(input)});if(response.headers.has('set-cookie'))cookie=response.headers.get('set-cookie').split(';')[0];return {status:response.status,data:await response.json()};}
   await request('login',{password:config.password});csrf=(await request('state')).data.csrf;
   async function idle(){for(let i=0;i<1000;i++){const state=(await request('state')).data;if(!state.job.running)return state;await new Promise(r=>setTimeout(r,2));}throw new Error('Timed out');}
-  async function preview(field,data,ids=variants.map(v=>v.id),extra={}){const r=await request('product-edit/preview',{field,data,ids,...extra});if(r.status!==200)throw new Error(r.data.error);return (await idle()).productEdit;}
-  async function apply(plan){const r=await request('product-edit/apply',{id:plan.id});if(r.status!==200)throw new Error(r.data.error);return idle();}
-  return {app,config,base,request,idle,preview,apply,variants,locations,calls,writes,controls};
+  async function save(field,data,ids=variants.map(v=>v.id),extra={}){const r=await request('product-edit/save',{requestId:randomUUID(),field,data,ids,...extra});if(r.status!==200)throw new Error(r.data.error);return idle();}
+  return {app,config,base,request,idle,save,variants,locations,calls,writes,controls};
 }
