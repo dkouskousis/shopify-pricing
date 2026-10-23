@@ -1,3 +1,4 @@
+import {createProductStatus} from './product-status.mjs';
 import http from 'node:http';
 import { columnPreferences } from './public/product-columns.mjs';
 import { createProductDelete } from './product-delete.mjs';
@@ -238,6 +239,7 @@ export function createApplication(config, dependencies = {}) {
     job.message = `Μαζική αλλαγή ${plan.field === 'cost' ? 'κόστους' : 'τιμής πώλησης'}: ${success} ενημερώθηκαν, ${failed} χρειάζονται έλεγχο. Δες το ιστορικό.${shuttingDown ? ' Η εργασία διακόπηκε λόγω επανεκκίνησης.' : ''}`;
   }
 
+  const productStatus=createProductStatus({store,graphql,startJob,jobState:()=>job,safeError,stopping:()=>shuttingDown,invalidate});
   const productDelete = createProductDelete({store,graphql,startJob,jobState:()=>job,safeError,stopping:()=>shuttingDown,invalidate,pause:dependencies.deletePause});
   const productEdit = createProductEdit({store,graphql,startJob,jobState:()=>job,safeError,stopping:()=>shuttingDown,invalidate});
   const shipping = createShippingService({ store, graphql, startJob, jobState: () => job, safeError, stopping: () => shuttingDown, makeDhl: dependencies.makeDhl, postalFetch: dependencies.postalFetch });
@@ -286,6 +288,9 @@ export function createApplication(config, dependencies = {}) {
         const input = await body(req);
         if (url.pathname === '/api/preferences/products') { store.put('productColumns', columnPreferences(input)); return json({ok:true}); }
         if (job.running || costSaving || priceSaving || shuttingDown) fail('Περίμενε να ολοκληρωθεί η τρέχουσα εργασία.', 409);
+        if (url.pathname.startsWith('/api/product-status/')) {
+          priceSaving=true;try{return json(await productStatus.handle(url.pathname,input));}finally{priceSaving=false;}
+        }
         if (url.pathname.startsWith('/api/product-delete/')) {
           priceSaving=true;
           try { return json(await productDelete.handle(url.pathname,input)); } finally { priceSaving=false; }
@@ -381,7 +386,7 @@ export function createApplication(config, dependencies = {}) {
         }
         fail('Δεν βρέθηκε.', 404);
       }
-      const paths = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/shipping-ui.mjs': ['shipping-ui.mjs', 'text/javascript'], '/product-edit-ui.mjs': ['product-edit-ui.mjs', 'text/javascript'], '/product-columns.mjs': ['product-columns.mjs', 'text/javascript'], '/product-columns-ui.mjs': ['product-columns-ui.mjs', 'text/javascript'], '/product-delete-ui.mjs': ['product-delete-ui.mjs', 'text/javascript'], '/shipping-table-ui.mjs': ['shipping-table-ui.mjs', 'text/javascript'], '/shipping-summary.mjs': ['shipping-summary.mjs', 'text/javascript'], '/postal-ui.mjs': ['postal-ui.mjs', 'text/javascript'], '/shipping-sample.mjs': ['shipping-sample.mjs', 'text/javascript'], '/product-filters.mjs': ['product-filters.mjs', 'text/javascript'], '/pricing.mjs': ['pricing.mjs', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
+      const paths = { '/numeric.mjs':['numeric.mjs','text/javascript'], '/product-status-ui.mjs':['product-status-ui.mjs','text/javascript'], '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/shipping-ui.mjs': ['shipping-ui.mjs', 'text/javascript'], '/product-edit-ui.mjs': ['product-edit-ui.mjs', 'text/javascript'], '/product-columns.mjs': ['product-columns.mjs', 'text/javascript'], '/product-columns-ui.mjs': ['product-columns-ui.mjs', 'text/javascript'], '/product-delete-ui.mjs': ['product-delete-ui.mjs', 'text/javascript'], '/shipping-table-ui.mjs': ['shipping-table-ui.mjs', 'text/javascript'], '/shipping-summary.mjs': ['shipping-summary.mjs', 'text/javascript'], '/postal-ui.mjs': ['postal-ui.mjs', 'text/javascript'], '/shipping-sample.mjs': ['shipping-sample.mjs', 'text/javascript'], '/product-filters.mjs': ['product-filters.mjs', 'text/javascript'], '/pricing.mjs': ['pricing.mjs', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
       if (req.method === 'GET' && paths[url.pathname]) {
         const [file, type] = paths[url.pathname];
         res.writeHead(200, { ...headers, 'Content-Type': `${type}; charset=utf-8` });

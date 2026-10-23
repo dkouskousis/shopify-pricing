@@ -1,3 +1,4 @@
+import {cleanNumber} from './numeric.mjs';
 import { shippingTableUI } from './shipping-table-ui.mjs';
 import { sampleDefaults } from './shipping-sample.mjs';
 export function shippingUI({ $, api, action, notify, load, euros, escape, date }) {
@@ -15,7 +16,7 @@ export function shippingUI({ $, api, action, notify, load, euros, escape, date }
       if (!row.quote || Date.now() - Date.parse(row.quote.at) > 900000 || row.quote.environment !== 'live') return null;
       base = row.quote.products.find(p => p.code === $('#shipping-service').value)?.price;
     }
-    const input = $('#shipping-value').value.trim().replace(',', '.');
+    const input = cleanNumber($('#shipping-value').value);
     if (base == null || !/^[+-]?\d+(?:\.\d{1,2})?$/.test(input)) return null;
     const value = Number(input), final = $('#shipping-kind').value === 'percent' ? Math.round(base * (1+value/100)) : base + Math.round(value*100);
     if (!Number.isSafeInteger(final) || final < 0 || final > 100000000) return null;

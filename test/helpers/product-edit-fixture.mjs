@@ -20,6 +20,14 @@ export async function productHarness(t,count=2,port=0) {
     if(query.includes('PricingVariants'))return {productVariants:{nodes:variants.filter(v=>!deleted.has(v.product.id)).map(view),pageInfo:info}};
     if(query.includes('PricingCollections'))return {collections:{nodes:[],pageInfo:info}};
     if(query.includes('PricingMemberships'))return {nodes:vars.ids.map(id=>({id,collections:{nodes:[],pageInfo:info}}))};
+    if(query.includes('ProductStatusDetails')){const v=variants.find(v=>v.product.id===vars.id&&!deleted.has(vars.id));return {product:v?{id:vars.id,title:v.product.title,status:controls.statusRead??v.product.status}:null};}
+    if(query.includes('UpdateProductStatus')){
+      writes.push({query,vars:structuredClone(vars)});if(controls.wait)await controls.wait;
+      if(controls.statusDenied)return {productUpdate:{product:null,userErrors:[{message:'Status permission denied'}]}};
+      const group=variants.filter(v=>v.product.id===vars.product.id);if(!controls.statusKeep)for(const v of group)v.product.status=vars.product.status;
+      if(controls.statusNetwork)throw new Error('Status network timeout');
+      return {productUpdate:{product:{id:vars.product.id,status:vars.product.status},userErrors:[]}};
+    }
     if(query.includes('ProductDeleteDetails')){
       const group=variants.filter(v=>v.product.id===vars.id);
       return {product:group.length&&(!deleted.has(vars.id)||controls.keepDeletedProduct)?{id:vars.id,title:group[0].product.title,updatedAt:controls.productUpdatedAt??'2026-10-23T10:00:00Z',variantsCount:{count:group.length,precision:'EXACT'}}:null};

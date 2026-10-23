@@ -1,3 +1,4 @@
+import {cleanNumber} from './numeric.mjs';
 import { rateGroups, weightLimit, checkRate, destinationRates } from './shipping-summary.mjs';
 export function shippingTableUI({ $, escape, euros, date }) {
   let state;
@@ -25,7 +26,7 @@ export function shippingTableUI({ $, escape, euros, date }) {
     }).join('')}</tr>`).join('')}</tbody></table>`:'<p class="muted">Δεν βρέθηκαν χρεώσεις. Κάνε συγχρονισμό μεταφορικών ή άλλαξε τα φίλτρα.</p>';
   }
   function calculate() {
-    const country=$('#shipping-calc-country').value,weight=Number($('#shipping-calc-weight').value.replace(',','.')),text=$('#shipping-calc-value').value.trim().replace(',','.');
+    const country=$('#shipping-calc-country').value,weight=Number(cleanNumber($('#shipping-calc-weight').value)),text=cleanNumber($('#shipping-calc-value').value);
     const value=text===''?null:Number(text),target=$('#shipping-calc-results');
     if(!country){target.innerHTML='<p class="muted">Επίλεξε χώρα και βάρος για να δεις τις χρεώσεις.</p>';return;}
     if(!Number.isFinite(weight)||weight<=0||value!==null&&(!Number.isFinite(value)||value<0)){target.innerHTML='<p class="negative">Βάλε βάρος μεγαλύτερο από 0 και έγκυρη αξία παραγγελίας.</p>';return;}

@@ -1,3 +1,4 @@
+import {cleanNumber} from './public/numeric.mjs';
 import { decimal, money } from './pricing.mjs';
 // Shopify's grouped shipping configuration is currently exposed in unstable only.
 export const SHIPPING_API_VERSION = 'unstable';
@@ -107,7 +108,7 @@ export function shippingUpdate(row, price) {
 }
 export function adjustedShippingPrice(price, kind, value) {
   if (!Number.isSafeInteger(price) || price < 0) throw new Error('Μη έγκυρη βασική τιμή μεταφορικών.');
-  const text = String(value).trim().replace(',', '.');
+  const text = cleanNumber(value);
   if (!/^[+-]?\d+(?:\.\d{1,2})?$/.test(text)) throw new Error('Βάλε ποσό ή ποσοστό με έως δύο δεκαδικά.');
   const n = Number(text); if (!Number.isFinite(n) || Math.abs(n) > 100000) throw new Error('Μη έγκυρη προσαρμογή.');
   if (!['fixed', 'percent'].includes(kind)) throw new Error('Μη έγκυρος τρόπος προσαρμογής.');

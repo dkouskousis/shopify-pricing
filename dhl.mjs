@@ -1,3 +1,4 @@
+import {cleanNumber} from './public/numeric.mjs';
 import { decimal } from './pricing.mjs';
 const text = (value, name, max = 100) => {
   if (typeof value !== 'string' || !value.trim() || value.length > max || /[\x00-\x1f]/.test(value)) throw new Error(`Συμπλήρωσε σωστά: ${name}.`);
@@ -21,7 +22,7 @@ export function validateShipment(input) {
   const date = new Date(s.plannedShippingDate + 'T00:00:00Z');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s.plannedShippingDate) || !Number.isFinite(+date) || date.toISOString().slice(0,10) !== s.plannedShippingDate || s.plannedShippingDate < new Date().toISOString().slice(0,10)) throw new Error('Βάλε έγκυρη σημερινή ή μελλοντική ημερομηνία.');
   for (const key of ['weight','length','width','height']) {
-    const n = Number(String(input[key]).replace(',', '.'));
+    const n = Number(cleanNumber(input[key]));
     if (!Number.isFinite(n) || n <= 0 || n > 1000 || Math.abs(n * 1000 - Math.round(n * 1000)) > 1e-6 || (key !== 'weight' && n < 1)) throw new Error(`Μη έγκυρο ${key}: κιλά / εκατοστά, έως 3 δεκαδικά.`);
     s[key] = n;
   }

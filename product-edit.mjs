@@ -1,3 +1,4 @@
+import {cleanNumber} from './public/numeric.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 const factors={KILOGRAMS:1,GRAMS:.001,POUNDS:.45359237,OUNCES:.028349523125};
 export function inventoryFields(v) {
@@ -15,9 +16,9 @@ export const EDIT_QUERIES={
   activate:`mutation ProductEditActivate($inventoryItemId:ID!,$locationId:ID!,$key:String!){inventoryActivate(inventoryItemId:$inventoryItemId,locationId:$locationId) @idempotent(key:$key){inventoryLevel{id}userErrors{field message}}}`,
 };
 const hash=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
-const integer=value=>{if(!/^-?\d+$/.test(String(value).trim()))throw new Error('Το απόθεμα πρέπει να είναι ακέραιος αριθμός.');const n=Number(value);if(!Number.isSafeInteger(n)||Math.abs(n)>1000000)throw new Error('Βάλε ποσότητα από -1.000.000 έως 1.000.000.');return n;};
+const integer=value=>{if(!/^-?\d+$/.test(cleanNumber(value)))throw new Error('Το απόθεμα πρέπει να είναι ακέραιος αριθμός.');const n=Number(cleanNumber(value));if(!Number.isSafeInteger(n)||Math.abs(n)>1000000)throw new Error('Βάλε ποσότητα από -1.000.000 έως 1.000.000.');return n;};
 export function changedWeight(current,mode,value) {
-  const text=String(value).trim().replace(',','.');if(!/^[+-]?\d+(?:\.\d{1,6})?$/.test(text))throw new Error('Βάλε έγκυρο βάρος ή μεταβολή με έως 6 δεκαδικά.');
+  const text=cleanNumber(value);if(!/^[+-]?\d+(?:\.\d{1,6})?$/.test(text))throw new Error('Βάλε έγκυρο βάρος ή μεταβολή με έως 6 δεκαδικά.');
   const n=Number(text);if(!['set','fixed','percent'].includes(mode))throw new Error('Μη έγκυρος τρόπος αλλαγής βάρους.');
   if(mode!=='set'&&current===null)throw new Error('Λείπει βάρος. Χρησιμοποίησε ορισμό νέου βάρους.');
   const result=Math.round((mode==='set'?n:mode==='fixed'?current+n:current*(1+n/100))*1e6)/1e6;
@@ -32,7 +33,7 @@ function validate(input) {
   if(!Array.isArray(input.ids)||!input.ids.length||input.ids.length>2000||new Set(input.ids).size!==input.ids.length||input.ids.some(id=>typeof id!=='string'))throw new Error('Επίλεξε 1–2.000 διαφορετικές παραλλαγές.');
   const data=input.data;if(!data||typeof data!=='object')throw new Error('Λείπουν τα στοιχεία αλλαγής.');
   if(input.expected!==undefined&&(input.ids.length!==1||typeof input.expected!=='string'))throw new Error('Μη έγκυρος έλεγχος προηγούμενων στοιχείων.');
-  if(input.field==='weight'){if(!['set','fixed','percent'].includes(data.mode)||!(/^[+-]?\d+(?:[.,]\d{1,6})?$/).test(String(data.value).trim()))throw new Error('Βάλε έγκυρο βάρος ή μεταβολή με έως 6 δεκαδικά.');return;}
+  if(input.field==='weight'){if(!['set','fixed','percent'].includes(data.mode)||!(/^[+-]?\d+(?:[.,]\d{1,6})?$/).test(cleanNumber(data.value)))throw new Error('Βάλε έγκυρο βάρος ή μεταβολή με έως 6 δεκαδικά.');return;}
   if(![null,true,false].includes(data.tracked)||![null,'CONTINUE','DENY'].includes(data.policy))throw new Error('Μη έγκυρες ρυθμίσεις αποθέματος.');
   if(!Array.isArray(data.quantities)||data.quantities.length>250||new Set(data.quantities.map(q=>q.locationId)).size!==data.quantities.length)throw new Error('Μη έγκυρες αποθήκες.');
   for(const q of data.quantities){if(typeof q.locationId!=='string'||!q.locationId||!['set','fixed'].includes(q.mode))throw new Error('Μη έγκυρη αλλαγή ποσότητας.');integer(q.value);}

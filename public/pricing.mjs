@@ -1,6 +1,7 @@
+import {cleanNumber} from './numeric.mjs';
 // Money is stored in integer cents. Percentages have two decimal places.
 export function decimal(value, label = 'Αριθμός', max = 1000000) {
-  const text = String(value ?? '').trim().replace(',', '.');
+  const text = cleanNumber(value);
   if (!/^\d+(\.\d{1,2})?$/.test(text)) throw new Error(`${label}: χρειάζεται μη αρνητικός αριθμός με έως 2 δεκαδικά.`);
   const number = Number(text);
   if (number > max) throw new Error(`${label}: υπερβαίνει το όριο ${max}.`);
@@ -9,7 +10,7 @@ export function decimal(value, label = 'Αριθμός', max = 1000000) {
 export function money(cents) { return (cents / 100).toFixed(2); }
 function roundDivide(n, d) { return (n + d / 2n) / d; }
 export function priceMultiplier(value) {
-  const text = String(value ?? '').trim().replace(',', '.');
+  const text = cleanNumber(value);
   if (!/^\d+(\.\d{1,4})?$/.test(text) || Number(text) <= 0 || Number(text) > 100) throw new Error('Συντελεστής τιμής: βάλε αριθμό μεγαλύτερο από 0 και έως 100, με έως 4 δεκαδικά, π.χ. 1,55.');
   return Math.round(Number(text) * 10000);
 }
@@ -74,7 +75,7 @@ export function bulkAmount(current, mode, value) {
   if (!['fixed', 'percent'].includes(mode)) throw new Error('Επίλεξε τρόπο αλλαγής.');
   if (current === null) throw new Error('Υπάρχει προϊόν χωρίς συμπληρωμένη τιμή. Χρησιμοποίησε «Ίδια τιμή για όλα».');
   if (!Number.isSafeInteger(current) || current < 0) throw new Error('Μη έγκυρη τωρινή τιμή.');
-  const text = String(value ?? '').trim().replace(',', '.');
+  const text = cleanNumber(value);
   if (!/^[+-]?\d+(?:\.\d{1,2})?$/.test(text) || Math.abs(Number(text)) > 1000000) throw new Error('Βάλε ποσό ή ποσοστό με έως δύο δεκαδικά.');
   const change = Math.round(Number(text.replace(/^[+-]/, '')) * 100) * (text.startsWith('-') ? -1 : 1);
   const result = mode === 'fixed' ? current + change : Math.round(current * (10000 + change) / 10000);
