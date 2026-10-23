@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { createProductEdit, inventoryFields } from './product-edit.mjs';
 import { randomBytes, scryptSync, timingSafeEqual, createHash, createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -20,7 +21,7 @@ function fingerprint(v, checkCollections) {
   return JSON.stringify([v.price, v.cost, v.currency, v.vendor, v.status, v.taxable, v.compareAt, checkCollections ? v.collectionIds : null]);
 }
 function normalize(v) {
-  return { id: v.id, productId: v.product.id, title: v.product.title, variant: v.title,
+  return { ...inventoryFields(v), id: v.id, productId: v.product.id, title: v.product.title, variant: v.title,
     image: v.product.featuredMedia?.preview?.image ?? null,
     vendor: v.product.vendor, status: v.product.status, sku: v.inventoryItem.sku || '',
     price: decimal(v.price), compareAt: v.compareAtPrice === null ? null : decimal(v.compareAtPrice), taxable: v.taxable,
@@ -235,6 +236,7 @@ export function createApplication(config, dependencies = {}) {
     job.message = `Μαζική αλλαγή ${plan.field === 'cost' ? 'κόστους' : 'τιμής πώλησης'}: ${success} ενημερώθηκαν, ${failed} χρειάζονται έλεγχο. Δες το ιστορικό.${shuttingDown ? ' Η εργασία διακόπηκε λόγω επανεκκίνησης.' : ''}`;
   }
 
+  const productEdit = createProductEdit({store,graphql,startJob,jobState:()=>job,safeError,stopping:()=>shuttingDown,invalidate});
   const shipping = createShippingService({ store, graphql, startJob, jobState: () => job, safeError, stopping: () => shuttingDown, makeDhl: dependencies.makeDhl, postalFetch: dependencies.postalFetch });
   const server = http.createServer(async (req, res) => {
     const headers = {
@@ -274,12 +276,16 @@ export function createApplication(config, dependencies = {}) {
           const s = store.settings();
           return json({ csrf: session.csrf, job: { ...job, costSaving, priceSaving }, lastSync: store.get('lastSync'), shopInfo: store.get('shopInfo'),
             settings: s ? { shop: s.shop, mode: s.mode, clientId: s.clientId, hasClientSecret: Boolean(s.clientSecret), hasAccessToken: Boolean(s.accessToken) } : null,
-            shipping: shipping.state(), rules: store.rules(), collections: store.get('collections'), vendors: [...new Set(store.variants().map(v => v.vendor))].sort(),
+            productEdit: productEdit.state(), shipping: shipping.state(), rules: store.rules(), collections: store.get('collections'), vendors: [...new Set(store.variants().map(v => v.vendor))].sort(),
             products: store.variants().map(resultFor), audit: db.prepare('SELECT * FROM audit ORDER BY id DESC LIMIT 2000').all() });
         }
         if (req.method !== 'POST') fail('Δεν βρέθηκε.', 404);
         const input = await body(req);
         if (job.running || costSaving || priceSaving || shuttingDown) fail('Περίμενε να ολοκληρωθεί η τρέχουσα εργασία.', 409);
+        if (url.pathname.startsWith('/api/product-edit/')) {
+          priceSaving=true;
+          try { return json(await productEdit.handle(url.pathname,input)); } finally { priceSaving=false; }
+        }
         if (url.pathname.startsWith('/api/shipping/') || url.pathname === '/api/dhl/settings') {
           priceSaving = true;
           try { return json(await shipping.handle(url.pathname, input)); } finally { priceSaving = false; }
@@ -367,7 +373,7 @@ export function createApplication(config, dependencies = {}) {
         }
         fail('Δεν βρέθηκε.', 404);
       }
-      const paths = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/shipping-ui.mjs': ['shipping-ui.mjs', 'text/javascript'], '/shipping-table-ui.mjs': ['shipping-table-ui.mjs', 'text/javascript'], '/shipping-summary.mjs': ['shipping-summary.mjs', 'text/javascript'], '/postal-ui.mjs': ['postal-ui.mjs', 'text/javascript'], '/shipping-sample.mjs': ['shipping-sample.mjs', 'text/javascript'], '/product-filters.mjs': ['product-filters.mjs', 'text/javascript'], '/pricing.mjs': ['pricing.mjs', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
+      const paths = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/shipping-ui.mjs': ['shipping-ui.mjs', 'text/javascript'], '/product-edit-ui.mjs': ['product-edit-ui.mjs', 'text/javascript'], '/shipping-table-ui.mjs': ['shipping-table-ui.mjs', 'text/javascript'], '/shipping-summary.mjs': ['shipping-summary.mjs', 'text/javascript'], '/postal-ui.mjs': ['postal-ui.mjs', 'text/javascript'], '/shipping-sample.mjs': ['shipping-sample.mjs', 'text/javascript'], '/product-filters.mjs': ['product-filters.mjs', 'text/javascript'], '/pricing.mjs': ['pricing.mjs', 'text/javascript'], '/style.css': ['style.css', 'text/css'] };
       if (req.method === 'GET' && paths[url.pathname]) {
         const [file, type] = paths[url.pathname];
         res.writeHead(200, { ...headers, 'Content-Type': `${type}; charset=utf-8` });

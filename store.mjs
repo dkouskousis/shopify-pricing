@@ -97,6 +97,9 @@ export function openStore(path, encryptionKey) {
       UPDATE audit SET sku=COALESCE((SELECT json_extract(data,'$.sku') FROM variants WHERE variants.id=audit.variant_id),'');
       PRAGMA user_version=11; COMMIT;`);
   }
+  if (db.prepare('PRAGMA user_version').get().user_version < 12) {
+    db.exec(`BEGIN; ALTER TABLE audit ADD COLUMN old_text TEXT; ALTER TABLE audit ADD COLUMN new_text TEXT; DELETE FROM previews; PRAGMA user_version=12; COMMIT;`);
+  }
   // Keep exactly the latest 2,000 attempts, including shipping changes.
   db.exec(`DELETE FROM audit WHERE id NOT IN (SELECT id FROM audit ORDER BY id DESC LIMIT 2000);
     CREATE TRIGGER IF NOT EXISTS audit_sku_and_retention AFTER INSERT ON audit BEGIN
@@ -104,7 +107,7 @@ export function openStore(path, encryptionKey) {
       DELETE FROM audit WHERE id NOT IN (SELECT id FROM audit ORDER BY id DESC LIMIT 2000);
     END;`);
   // Interrupted writes may have reached Shopify. Never automatically repeat them.
-  db.prepare("UPDATE audit SET status='uncertain',detail='Η εφαρμογή επανεκκινήθηκε κατά την ενημέρωση. Συγχρόνισε και έλεγξε τιμή, κόστος ή μεταφορικά.' WHERE status='pending'").run();
+  db.prepare("UPDATE audit SET status='uncertain',detail='Η εφαρμογή επανεκκινήθηκε κατά την ενημέρωση. Συγχρόνισε και έλεγξε τα στοιχεία στο Shopify.' WHERE status='pending'").run();
   const key = Buffer.from(encryptionKey, 'hex');
   function encrypt(value) {
     const iv = randomBytes(12), cipher = createCipheriv('aes-256-gcm', key, iv);

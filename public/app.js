@@ -1,3 +1,4 @@
+import { productEditUI } from './product-edit-ui.mjs';
 import { decimal, validateRule, calculate } from './pricing.mjs';
 import { postalUI } from './postal-ui.mjs';
 import { shippingUI } from './shipping-ui.mjs';
@@ -41,9 +42,11 @@ function filtered() {
 function eligible(p) { return !p.result.error && p.result.final !== p.price; }
 function manualSelection() { return $('#selection-purpose').value === 'manual'; }
 function selectable(p) { return manualSelection() || eligible(p); }
+const productEdit = productEditUI({$,api,action,load,escape,notify,selection:()=>[...selected]});
 function updateSelection() {
   $('#selection-count').textContent = `${selected.size} επιλεγμένες`;
   const disabled = !selected.size || Boolean(state?.job.running || state?.job.costSaving || state?.job.priceSaving);
+  productEdit.selectionChanged();
   $('#preview').hidden = manualSelection(); $('#bulk-edit').hidden = !manualSelection();
   $('#preview').disabled = disabled; $('#bulk-edit').disabled = disabled;
 }
@@ -58,8 +61,10 @@ function renderProducts() {
     const direction = !p.result.error && p.result.final !== p.price ? (p.result.final > p.price ? 'up' : 'down') : '';
     const priceChange = direction ? `${direction === 'up' ? 'Αύξηση' : 'Μείωση'} κατά ${euros(Math.abs(p.result.final - p.price))}` : '';
     return `<tr>
-    <td><input type="checkbox" data-select="${escape(p.id)}" aria-label="Επιλογή ${escape(p.title)} ${escape(p.variant)}" title="${escape(manualSelection() ? 'Επιλογή για μαζική αλλαγή κόστους ή πώλησης.' : p.result.error || (p.result.final === p.price ? 'Η τιμή είναι ήδη ενημερωμένη.' : 'Επιλογή για ενημέρωση τιμής.'))}" ${selected.has(p.id) ? 'checked' : ''} ${selectable(p) ? '' : 'disabled'}></td>
+    <td><input type="checkbox" data-select="${escape(p.id)}" aria-label="Επιλογή ${escape(p.title)} ${escape(p.variant)}" title="${escape(manualSelection() ? 'Επιλογή για μαζική αλλαγή τιμών, αποθέματος ή βάρους.' : p.result.error || (p.result.final === p.price ? 'Η τιμή είναι ήδη ενημερωμένη.' : 'Επιλογή για ενημέρωση τιμής.'))}" ${selected.has(p.id) ? 'checked' : ''} ${selectable(p) ? '' : 'disabled'}></td>
     <td><div class="product-cell">${p.image ? `<button class="product-thumbnail" data-image="${escape(p.id)}" aria-label="Μεγέθυνση φωτογραφίας: ${escape(p.title)}"><img src="${escape(p.image.thumbnail)}" alt="${escape(p.image.altText || p.title)}" width="32" height="32" loading="lazy" decoding="async" referrerpolicy="no-referrer"></button>` : '<span class="product-thumbnail-empty" title="Χωρίς φωτογραφία" aria-label="Χωρίς φωτογραφία">—</span>'}<div><span class="product-title">${escape(p.title)}</span><small>${escape(p.variant)} · ${escape(p.vendor)}<br>SKU: ${escape(p.sku || '—')} · ${escape(p.status)}</small>${p.result.error ? `<small class="negative">${escape(p.result.error)}</small>` : ''}</div></div></td>
+    <td class="number"><button class="quiet cost-button" data-edit-inventory="${escape(p.id)}" ${state.job.running||state.job.costSaving||state.job.priceSaving?'disabled':''} aria-label="Αλλαγή αποθέματος ${escape(p.title)}">${p.tracked===false?'Δεν παρακολουθείται':p.inventoryQuantity===null||p.inventoryQuantity===undefined?'—':p.inventoryQuantity}</button><small>${p.tracked===true?'Παρακολούθηση · ':''}${p.inventoryPolicy==='CONTINUE'?'Backorder':''}</small></td>
+    <td class="number"><button class="quiet cost-button" data-edit-weight="${escape(p.id)}" ${state.job.running||state.job.costSaving||state.job.priceSaving?'disabled':''} aria-label="Αλλαγή βάρους ${escape(p.title)}">${p.weightKg===null||p.weightKg===undefined?'Ορισμός':new Intl.NumberFormat('el-GR',{maximumFractionDigits:6}).format(p.weightKg)}</button></td>
     <td class="number"><button class="quiet cost-button" data-cost="${escape(p.id)}" aria-label="Αλλαγή κόστους για ${escape(p.title)} ${escape(p.variant)}" ${state.job.running || state.job.costSaving || state.job.priceSaving ? 'disabled' : ''}>${p.cost === null ? 'Προσθήκη κόστους' : euros(p.cost)}</button></td>
     <td class="number"><button class="quiet cost-button" data-price="${escape(p.id)}" aria-label="Αλλαγή τιμής πώλησης για ${escape(p.title)} ${escape(p.variant)}" ${state.job.running || state.job.costSaving || state.job.priceSaving ? 'disabled' : ''}>${euros(p.price)}</button>${p.compareAt ? `<small>Compare-at: ${euros(p.compareAt)}</small>` : ''}</td>
     <td class="number new-price ${direction ? 'price-' + direction : ''}" title="${escape(priceChange)}">${direction ? `<span aria-hidden="true">${direction === 'up' ? '↑' : '↓'}</span> ` : ''}${p.result.error ? '—' : euros(p.result.final)}${!p.result.error && p.result.final === p.price ? '<small>Ήδη ενημερωμένη</small>' : ''}</td>
@@ -68,7 +73,7 @@ function renderProducts() {
     <td class="number">${vatPercent === null ? '—' : pct(vatPercent)}</td>
     <td class="number ${p.result.profit < 0 ? 'negative' : ''}">${p.result.error ? '—' : euros(p.result.profit)}</td>
     <td class="number ${p.result.margin < 0 ? 'negative' : ''}">${p.result.error ? '—' : pct(p.result.margin)}</td></tr>`;
-  }).join('') : '<tr><td colspan="10" class="empty">Δεν υπάρχουν προϊόντα. Κάνε συγχρονισμό ή άλλαξε τα φίλτρα.</td></tr>';
+  }).join('') : '<tr><td colspan="12" class="empty">Δεν υπάρχουν προϊόντα. Κάνε συγχρονισμό ή άλλαξε τα φίλτρα.</td></tr>';
   $('#page-label').textContent = `Σελίδα ${page + 1} / ${pageCount} · ${all.length} παραλλαγές`;
   $('#previous').disabled = page === 0; $('#next').disabled = page >= pageCount - 1;
   const selectableRows = visible.filter(selectable);
@@ -109,12 +114,12 @@ async function load() {
   $('#vendor').innerHTML = '<option value="">Όλοι οι προμηθευτές</option>' + state.vendors.map(v => `<option value="${escape(v)}">${escape(v || '(κενό Vendor)')}</option>`).join('');
   $('#vendor').value = state.vendors.includes(vendor) ? vendor : '';
   selected = new Set([...selected].filter(id => state.products.some(p => p.id === id && selectable(p))));
-  renderProducts(); renderRules(); renderSettings(); shipping.render(state); postal.render(state); refreshCollectionOptions(); ruleExample();
+  renderProducts(); renderRules(); renderSettings(); shipping.render(state); postal.render(state); productEdit.render(state); refreshCollectionOptions(); ruleExample();
   const labels = { success: 'Επιτυχία', failed: 'Αποτυχία', uncertain: 'Χρειάζεται έλεγχο στο Shopify', pending: 'Σε εξέλιξη' };
-  $('#audit-rows').innerHTML = state.audit.length ? state.audit.map(a => `<tr><td>${date(a.created)}</td><td>${a.kind === 'cost' ? 'Κόστος αγοράς' : a.kind === 'shipping_page' ? 'Πίνακας ιστοσελίδας' : a.kind === 'shipping' ? 'Μεταφορικά' : 'Τιμή πώλησης'}</td><td>${escape(a.title)}</td><td>${escape(a.sku || '—')}</td><td class="number">${a.kind === 'shipping_page' || a.old_missing ? '—' : euros(a.old_price)}</td><td class="number">${a.kind === 'shipping_page' ? '—' : euros(a.new_price)}</td><td class="${a.status === 'success' ? 'positive' : 'negative'}">${labels[a.status] ?? escape(a.status)}<small>${escape(a.detail)}</small></td></tr>`).join('') : '<tr><td colspan="7" class="empty">Δεν έχουν καταγραφεί αλλαγές τιμών ή κόστους.</td></tr>';
+  $('#audit-rows').innerHTML = state.audit.length ? state.audit.map(a => `<tr><td>${date(a.created)}</td><td>${a.kind === 'inventory' ? 'Απόθεμα / Backorder' : a.kind === 'weight' ? 'Βάρος' : a.kind === 'cost' ? 'Κόστος αγοράς' : a.kind === 'shipping_page' ? 'Πίνακας ιστοσελίδας' : a.kind === 'shipping' ? 'Μεταφορικά' : 'Τιμή πώλησης'}</td><td>${escape(a.title)}</td><td>${escape(a.sku || '—')}</td><td class="${a.old_text!==null&&a.old_text!==undefined?'audit-text':'number'}">${a.old_text!==null&&a.old_text!==undefined?escape(a.old_text):a.kind === 'shipping_page' || a.old_missing ? '—' : euros(a.old_price)}</td><td class="${a.new_text!==null&&a.new_text!==undefined?'audit-text':'number'}">${a.new_text!==null&&a.new_text!==undefined?escape(a.new_text):a.kind === 'shipping_page' ? '—' : euros(a.new_price)}</td><td class="${a.status === 'success' ? 'positive' : 'negative'}">${labels[a.status] ?? escape(a.status)}<small>${escape(a.detail)}</small></td></tr>`).join('') : '<tr><td colspan="7" class="empty">Δεν έχουν καταγραφεί αλλαγές τιμών ή κόστους.</td></tr>';
   $('#sync').disabled = state.job.running || state.job.costSaving || state.job.priceSaving;
   $('#job').hidden = !state.job.running && !state.job.message && !state.job.error;
-  $('#job').textContent = state.job.running ? `${state.job.type === 'sync' ? 'Συγχρονισμός προϊόντων' : state.job.type === 'postal-refresh' ? 'Ενημέρωση χωρών & ΤΚ' : state.job.type === 'shipping-sync' ? 'Συγχρονισμός μεταφορικών' : state.job.type === 'shipping-apply' ? 'Ενημέρωση μεταφορικών' : state.job.type === 'manual' ? 'Μαζική επεξεργασία προϊόντων' : 'Ενημέρωση τιμών'}: ${state.job.completed}${state.job.total ? ' / ' + state.job.total : ''}…` : state.job.error || state.job.message;
+  $('#job').textContent = state.job.running ? `${state.job.type === 'sync' ? 'Συγχρονισμός προϊόντων' : state.job.type === 'postal-refresh' ? 'Ενημέρωση χωρών & ΤΚ' : state.job.type === 'shipping-sync' ? 'Συγχρονισμός μεταφορικών' : state.job.type === 'shipping-apply' ? 'Ενημέρωση μεταφορικών' : state.job.type === 'product-preview' ? 'Προεπισκόπηση αποθέματος / βάρους' : state.job.type === 'product-apply' ? 'Ενημέρωση αποθέματος / βάρους' : state.job.type === 'manual' ? 'Μαζική επεξεργασία προϊόντων' : 'Ενημέρωση τιμών'}: ${state.job.completed}${state.job.total ? ' / ' + state.job.total : ''}…` : state.job.error || state.job.message;
   if (wasRunning && !state.job.running) notify(state.job.error || state.job.message, Boolean(state.job.error));
   if (state.job.running) timer = setTimeout(() => load().catch(e => notify(e.message, true)), 2000);
 }
@@ -123,7 +128,7 @@ $('#login-form').addEventListener('submit', event => {
   event.preventDefault(); action(event.submitter, async () => { await api('login', { password: new FormData(event.target).get('password') }); event.target.reset(); await load(); });
 });
 $('#logout').addEventListener('click', event => action(event.currentTarget, async () => {
-  await api('logout', {}); clearTimeout(timer); state = null; selected.clear(); shipping.reset(); $('#workspace').hidden = true; $('#login').hidden = false;
+  await api('logout', {}); clearTimeout(timer); state = null; selected.clear(); shipping.reset(); productEdit.reset(); $('#workspace').hidden = true; $('#login').hidden = false;
 }));
 document.querySelectorAll('nav button').forEach(button => button.addEventListener('click', () => tab(button.dataset.tab)));
 for (const selector of ['#search', '#vendor', '#filter', '#status-filter', '#price-filter', '#cost-filter']) $(selector).addEventListener(selector === '#search' ? 'input' : 'change', () => { page = 0; renderProducts(); });

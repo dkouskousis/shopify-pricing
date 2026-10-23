@@ -13,7 +13,7 @@ test('rounding upgrade invalidates old previews once and preserves supplier rule
     const rule = { vendor: 'Existing', mode: 'margin', multiplier: null, targetMargin: 4000, fixed: 1000, vat: 2400, addVat: true };
     initial.db.prepare('INSERT INTO rules VALUES (?,?)').run(rule.vendor, JSON.stringify(rule));
     initial.db.prepare('INSERT INTO previews(id,data,expires) VALUES (?,?,?)').run('old', '{}', Date.now() + 10000);
-    initial.db.exec('DROP TRIGGER IF EXISTS audit_sku_and_retention; ALTER TABLE audit DROP COLUMN sku; PRAGMA user_version=5'); initial.db.close();
+    initial.db.exec('DROP TRIGGER IF EXISTS audit_sku_and_retention; ALTER TABLE audit DROP COLUMN sku; ALTER TABLE audit DROP COLUMN old_text; ALTER TABLE audit DROP COLUMN new_text; PRAGMA user_version=5'); initial.db.close();
     const upgraded = openStore(path, key);
     assert.deepEqual(upgraded.rules(), [{ ...withoutFixed(rule), conditions: [] }]);
     assert.equal(upgraded.db.prepare('SELECT count(*) AS n FROM previews').get().n, 0);
@@ -57,7 +57,7 @@ test('v1.2 rules migrate to multiplier mode once without changing the chosen fac
   try {
     const key = 'ab'.repeat(32), initial = openStore(path, key);
     initial.db.prepare('INSERT INTO rules VALUES (?,?)').run('Existing', JSON.stringify({ vendor: 'Existing', multiplier: 15457, vat: 2400, addVat: false }));
-    initial.db.exec('DROP TRIGGER IF EXISTS audit_sku_and_retention; ALTER TABLE audit DROP COLUMN sku; PRAGMA user_version=3'); initial.db.close();
+    initial.db.exec('DROP TRIGGER IF EXISTS audit_sku_and_retention; ALTER TABLE audit DROP COLUMN sku; ALTER TABLE audit DROP COLUMN old_text; ALTER TABLE audit DROP COLUMN new_text; PRAGMA user_version=3'); initial.db.close();
     const migrated = openStore(path, key);
     assert.deepEqual(migrated.rules()[0], { vendor: 'Existing', multiplier: 15457, vat: 2400, addVat: false, mode: 'multiplier', targetMargin: null, conditions: [] });
     migrated.db.prepare('UPDATE rules SET data=? WHERE vendor=?').run(JSON.stringify({ vendor: 'Existing', mode: 'margin', multiplier: null, targetMargin: 4000, vat: 2400, addVat: true }), 'Existing');
@@ -76,7 +76,7 @@ test('v1.6 upgrade removes global amounts, preserves separate condition amounts 
     const rule = { vendor: 'Existing', mode: 'margin', multiplier: null, targetMargin: 4000, fixed: 1000, vat: 2400, addVat: true, conditions };
     initial.db.prepare('INSERT INTO rules VALUES (?,?)').run(rule.vendor, JSON.stringify(rule));
     initial.db.prepare('INSERT INTO previews(id,data,expires) VALUES (?,?,?)').run('old', '{}', Date.now() + 10000);
-    initial.db.exec('DROP TRIGGER IF EXISTS audit_sku_and_retention; ALTER TABLE audit DROP COLUMN sku; PRAGMA user_version=7'); initial.db.close();
+    initial.db.exec('DROP TRIGGER IF EXISTS audit_sku_and_retention; ALTER TABLE audit DROP COLUMN sku; ALTER TABLE audit DROP COLUMN old_text; ALTER TABLE audit DROP COLUMN new_text; PRAGMA user_version=7'); initial.db.close();
     const migrated = openStore(path, key);
     assert.deepEqual(migrated.rules()[0], withoutFixed(rule));
     assert.equal(migrated.db.prepare('SELECT count(*) AS n FROM previews').get().n, 0);
@@ -95,7 +95,7 @@ test('condition upgrade preserves pricing mode and requires collections sync onl
     initial.db.prepare('INSERT INTO rules VALUES (?,?)').run(rule.vendor, JSON.stringify(rule));
     initial.db.prepare('INSERT INTO variants VALUES (?,?)').run('variant', JSON.stringify({ id: 'variant', cost: 6000 }));
     initial.db.prepare('INSERT INTO previews(id,data,expires) VALUES (?,?,?)').run('old', '{}', Date.now() + 10000);
-    initial.db.exec('DROP TRIGGER IF EXISTS audit_sku_and_retention; ALTER TABLE audit DROP COLUMN sku; PRAGMA user_version=6'); initial.db.close();
+    initial.db.exec('DROP TRIGGER IF EXISTS audit_sku_and_retention; ALTER TABLE audit DROP COLUMN sku; ALTER TABLE audit DROP COLUMN old_text; ALTER TABLE audit DROP COLUMN new_text; PRAGMA user_version=6'); initial.db.close();
     const upgraded = openStore(path, key);
     assert.deepEqual(upgraded.rules(), [{ ...withoutFixed(rule), conditions: [] }]);
     assert.equal(upgraded.variant('variant').collectionIds, null);

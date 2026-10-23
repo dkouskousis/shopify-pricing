@@ -13,8 +13,8 @@ export const QUERIES = {
   shop: `query ShopInfo { shop { name myshopifyDomain currencyCode } }`,
   variants: `query PricingVariants($after: String) {
     productVariants(first: 100, after: $after) {
-      nodes { id title price compareAtPrice taxable
-        inventoryItem { sku unitCost { amount currencyCode } }
+      nodes { id title price compareAtPrice taxable inventoryPolicy inventoryQuantity
+        inventoryItem { id sku tracked measurement { weight { value unit } } unitCost { amount currencyCode } }
         product { id title vendor status
           featuredMedia { preview { image { altText thumbnail: url(transform: {maxWidth: 80, maxHeight: 80}) url(transform: {maxWidth: 1600, maxHeight: 1600}) } } }
         }
